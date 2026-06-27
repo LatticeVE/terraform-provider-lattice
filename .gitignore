@@ -1,0 +1,4 @@
+terraform-provider-lattice
+*.tfstate
+*.tfstate.backup
+.terraform/
