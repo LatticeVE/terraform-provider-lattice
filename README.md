@@ -44,9 +44,16 @@ provider "lattice" {
 | `lattice_public_ip` | Allocate a public IP; optional static NAT |
 | `lattice_storage_backend` | Register a storage backend (LVM, LINSTOR, NFS, Ceph, …) |
 | `lattice_storage_volume` | Provision a block volume; grow-only resize |
-| `lattice_kube_cluster` | Managed Talos Linux Kubernetes cluster |
+| `lattice_kube_cluster` | Managed LatticeKube cluster — k3s control plane and workers on Firecracker microVMs |
+| `lattice_k3s_kernel` | Import a Kubernetes-compatible Firecracker kernel from latticeve-k3s-images |
+| `lattice_kernel_catalog_import` | Import a Kernel Catalog entry into the kernels table |
+| `lattice_k3s_rootfs_image` | Import a pinned or latest k3s rootfs build from latticeve-k3s-images |
 | `lattice_security_group` | Security group with ingress/egress rules |
+| `lattice_vm_security_group` | Attach a security group to a VM |
 | `lattice_ipam_pool` | DHCP pool for automatic VM IP assignment |
+| `lattice_ipam_lease` | Static IP/MAC lease within an IPAM pool |
+| `lattice_affinity_group` | Affinity or anti-affinity placement group |
+| `lattice_vm_affinity_group` | Assign a VM to a placement group |
 
 ## Data Sources
 
@@ -55,9 +62,11 @@ provider "lattice" {
 | `lattice_vm` | Look up a VM by ID or name |
 | `lattice_vpc` | Look up a VPC by ID or name |
 | `lattice_image` | Look up a VM image by distro/version/arch for use as a boot disk (AMI-style) |
-| `lattice_kernel` | Look up a Firecracker kernel by distro, `distro_version`, or `version_glob` |
+| `lattice_kernel` | Look up an already-imported Firecracker kernel by distro, `version`/`version_glob`, or `arch` |
+| `lattice_kernel_catalog` | Browse kernels available to import (built-in entries plus Firecracker CI discovery) |
+| `lattice_rootfs_image` | Look up a Firecracker rootfs image by name, arch, source, or version |
 | `lattice_nodes` | List host nodes filtered by `arch` (`amd64`/`arm64`); returns capacity metrics |
-| `lattice_kube_releases` | List available Talos releases |
+| `lattice_kube_cluster` | Look up a cluster and retrieve endpoint, kubeconfig, image, and live node status |
 | `lattice_public_ip_pools` | List all public IP pools |
 | `lattice_storage_backends` | List all storage backends |
 
@@ -153,15 +162,19 @@ output "placed_on" {
 ### Firecracker microVM
 
 ```hcl
-data "lattice_kernel" "alpine" {
-  distro         = "alpine"
-  distro_version = "3.24.1"
+data "lattice_kernel_catalog" "fc" {
+  distro = "firecracker"
+  arch   = "amd64"
+}
+
+resource "lattice_kernel_catalog_import" "fc" {
+  entry_id = data.lattice_kernel_catalog.fc.id
 }
 
 resource "lattice_vm" "fc" {
   name      = "fc-01"
   vm_type   = "firecracker"
-  kernel_id = data.lattice_kernel.alpine.id
+  kernel_id = lattice_kernel_catalog_import.fc.id
   cpus      = 2
   memory_mb = 512
   nics      = [{ bridge = lattice_vpc.main.bridge }]
@@ -171,25 +184,32 @@ resource "lattice_vm" "fc" {
 ### Managed Kubernetes Cluster (LatticeKube)
 
 ```hcl
-data "lattice_kube_releases" "all" {}
+resource "lattice_k3s_kernel" "kube" {
+  arch = "amd64"
+}
+
+resource "lattice_k3s_rootfs_image" "release" {
+  arch    = "amd64"
+  version = "v1.36.2+k3s1-r23"
+  lifecycle { create_before_destroy = true }
+}
 
 resource "lattice_public_ip_pool" "kube" {
   name      = "kube-pool"
-  interface = "eth0"
-  cidr      = "192.168.100.128/27"
+  interface = "br0"
+  cidr      = "10.0.7.128/28"
 }
 
 resource "lattice_kube_cluster" "prod" {
-  name          = "prod"
-  talos_image   = "/var/lib/lattice/images/talos-v1.9.0-metal-amd64.raw"
-  talos_version = data.lattice_kube_releases.all.releases[0].version
-  k8s_version   = data.lattice_kube_releases.all.releases[0].k8s_version
-  pool_id       = lattice_public_ip_pool.kube.id
-  cni           = "cilium"
-  cp_count      = 3
-  cp_vcpus      = 4
-  cp_memory_mb  = 8192
-  cp_disk_gb    = 50
+  name         = "prod"
+  kernel_id    = lattice_k3s_kernel.kube.id
+  rootfs_id    = lattice_k3s_rootfs_image.release.id
+  pool_id      = lattice_public_ip_pool.kube.id
+  cni          = "flannel"
+  cp_count     = 3
+  cp_vcpus     = 4
+  cp_memory_mb = 8192
+  cp_disk_gb   = 50
   worker_count     = 3
   worker_vcpus     = 8
   worker_memory_mb = 16384
@@ -202,16 +222,20 @@ output "kubeconfig" {
 }
 ```
 
-Scale workers or upgrade versions with a plan/apply — no replacement needed:
+Omit `kernel_id`/`rootfs_id` to use the controller's built-in k3s kernel and image instead. Scale workers with a plan/apply — no replacement needed:
 
 ```hcl
 resource "lattice_kube_cluster" "prod" {
   # ...
-  worker_count  = 5          # was 3
-  talos_version = "v1.9.1"  # upgrade
-  k8s_version   = "v1.32.2"
+  worker_count = 5  # was 3
 }
 ```
+
+To upgrade Kubernetes, change the rootfs `version` to the next supported release. The provider waits while LatticeVE snapshots etcd, rolls control planes, and drains/upgrades workers.
+
+## API Coverage
+
+The provider models persistent, declarative infrastructure: VMs, VPC policy and load balancers, public addressing, storage, Firecracker/k3s images, Kubernetes clusters, security-group relationships, IPAM leases, and affinity relationships. Controller operations such as console sessions, guest exec, migration internals, node drain commands, alert acknowledgement, and upgrade retry/force actions intentionally remain operational API/CLI workflows rather than Terraform resources.
 
 ## Full Examples
 

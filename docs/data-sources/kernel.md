@@ -1,46 +1,35 @@
 # lattice_kernel (Data Source)
 
-Look up a kernel from the LatticeVE kernel catalog. At least one filter must be provided. If multiple kernels match, the most recently built one is returned.
+Look up an already-imported kernel from LatticeVE's `GET /kernels`. At least one filter must be provided. If multiple kernels match, the most recently imported one is returned.
 
-Use the result's `id` as the `kernel_id` argument on `lattice_vm` when `vm_type = "firecracker"`.
+To browse kernels available to import but not yet imported, use `lattice_kernel_catalog` instead, then `lattice_kernel_catalog_import` to import one.
+
+Use the result's `id` as the `kernel_id` argument on `lattice_vm` (when `vm_type = "firecracker"`) or `lattice_kube_cluster`.
 
 ## Example Usage
 
 ```hcl
-# Alpine 3.24.1 — use the distro's own release version
-data "lattice_kernel" "alpine" {
-  distro         = "alpine"
-  distro_version = "3.24.1"
-}
-
-# Ubuntu 26.04 LTS
-data "lattice_kernel" "ubuntu" {
-  distro         = "ubuntu"
-  distro_version = "26.04"
-}
-
-# Pin to an exact upstream kernel version (distro-agnostic)
+# Pin to an exact kernel version for a given arch
 data "lattice_kernel" "pinned" {
-  distro  = "alpine"
-  version = "6.12.9"
+  version = "6.1.141"
+  arch    = "amd64"
 }
 
-# Float within an upstream minor via glob (useful for custom/uploaded kernels
-# that may not have distro_version set)
+# Float within a minor via glob
 data "lattice_kernel" "glob" {
-  distro       = "alpine"
-  version_glob = "6.12.*"
+  distro       = "firecracker"
+  version_glob = "6.1.*"
 }
 
-# Exact name match (useful for custom-named catalog entries)
-data "lattice_kernel" "talos" {
-  name = "talos-v1.9.0"
+# Exact name match
+data "lattice_kernel" "named" {
+  name = "Firecracker Kernel 6.1.141 (amd64)"
 }
 
 resource "lattice_vm" "fc" {
   name      = "fc-01"
   vm_type   = "firecracker"
-  kernel_id = data.lattice_kernel.alpine.id
+  kernel_id = data.lattice_kernel.pinned.id
   cpus      = 2
   memory_mb = 1024
   # ...
@@ -49,23 +38,21 @@ resource "lattice_vm" "fc" {
 
 ## Argument Reference
 
-At least one of `distro`, `name`, or `version` must be set. All provided filters are ANDed together.
+At least one of `distro`, `name`, `version`, `version_glob`, or `arch` must be set. All provided filters are ANDed together.
 
-- `distro` (Optional) — Distro name: `alpine`, `ubuntu`, `debian`, `fedora-coreos`, `talos`.
-- `distro_version` (Optional) — Distro release version in the distro's own scheme: `3.24.1` for Alpine, `26.04` for Ubuntu. Preferred over `version` when you want "whatever kernel ships with this release".
-- `name` (Optional) — Exact kernel name as registered in the catalog.
-- `version` (Optional) — Exact upstream Linux kernel version, e.g. `6.12.9`. Mutually exclusive with `version_glob`.
-- `version_glob` (Optional) — Glob pattern matched against the upstream kernel version. Supports `*` and `?`. E.g. `6.12.*` floats across patches, `6.*` matches any 6.x kernel. Useful for uploaded/custom kernels without a `distro_version`. Mutually exclusive with `version`.
+- `distro` (Optional) — Distro name, e.g. `firecracker`, `alpine`.
+- `name` (Optional) — Exact kernel name as registered in the kernels table.
+- `version` (Optional) — Exact kernel version. Mutually exclusive with `version_glob`.
+- `version_glob` (Optional) — Glob pattern matched against the kernel version. Supports `*` and `?`, e.g. `6.1.*`. Mutually exclusive with `version`.
+- `arch` (Optional) — Architecture: `amd64` or `arm64`.
 
 ## Attribute Reference
 
-- `id` — Kernel UUID. Pass this to `lattice_vm.kernel_id`.
-- `resolved_distro_version` — Distro release version of the selected kernel (e.g. `3.24.1`, `26.04`). Useful when filtering by `distro` only and you want to confirm which release was picked.
-- `built_at` — ISO 8601 timestamp of when the kernel was built or imported.
-- `size_bytes` — Combined size of vmlinuz + initramfs in bytes.
+- `id` — Kernel UUID. Pass this to `kernel_id`.
+- `created_at` — ISO 8601 timestamp of when the kernel was imported.
+- `size_bytes` — Size of the kernel image in bytes.
 - `vmlinuz_path` — Host path to the kernel image file.
-- `initramfs_path` — Host path to the initramfs image file.
 
 ## Notes
 
-Kernels are managed via `GET/POST/DELETE /kernels` on the LatticeVE API. New kernels can be imported from a URL (`POST /kernels/import`) or uploaded directly (`POST /kernels/upload`). LatticeVE ships curated kernels for Alpine (~6 MB), Ubuntu, Debian, and Fedora CoreOS; Talos kernels are pulled from the Talos image factory.
+Imported kernels are managed via `GET/POST/DELETE /kernels` on the LatticeVE API. New kernels reach that table either by direct upload (`POST /kernels`) or by importing a Kernel Catalog entry (`POST /kernel-catalog/{id}/import`, modeled here as `lattice_kernel_catalog_import`).

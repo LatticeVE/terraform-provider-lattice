@@ -24,12 +24,16 @@ variable "lattice_api_key" {
   default   = ""
 }
 
-# Look up the kernel that ships with Alpine 3.24.1.
-# distro_version matches Alpine's own release number; the newest built_at wins
-# if multiple patches exist (e.g. 3.24.0 and 3.24.1).
-data "lattice_kernel" "alpine" {
-  distro         = "alpine"
-  distro_version = "3.24.1"
+# Discover the latest amd64 Firecracker kernel in the Kernel Catalog and
+# import it into the kernels table (id is reused, so the import resource's
+# id is directly usable as kernel_id below).
+data "lattice_kernel_catalog" "fc" {
+  distro = "firecracker"
+  arch   = "amd64"
+}
+
+resource "lattice_kernel_catalog_import" "fc" {
+  entry_id = data.lattice_kernel_catalog.fc.id
 }
 
 # VPC — Firecracker VMs use the same bridge model as QEMU
@@ -69,10 +73,11 @@ resource "lattice_ipam_pool" "fc" {
   dns         = ["1.1.1.1", "8.8.8.8"]
 }
 
-# Public IP pool for NAT
+# Public IP pool for NAT. The CIDR must be reserved inside br0's connected
+# subnet and excluded from upstream DHCP.
 resource "lattice_public_ip_pool" "fc" {
   name      = "fc-public"
-  interface = "eth0"
+  interface = "br0"
   cidr      = "192.168.50.64/26"
 }
 
@@ -86,8 +91,9 @@ resource "lattice_public_ip" "fc" {
 # Firecracker microVM
 #
 # vm_type = "firecracker" selects the Firecracker backend.
-# kernel_id references a kernel registered in the LatticeVE kernel catalog
-# (GET /kernels shows available kernels; POST /kernels/import or /kernels/upload adds new ones).
+# kernel_id references an already-imported kernel (GET /kernels). New kernels
+# reach that table by uploading directly (POST /kernels) or importing a
+# Kernel Catalog entry (POST /kernel-catalog/{id}/import, as above).
 # Firecracker boots directly — no BIOS, no UEFI, no GRUB.
 #
 # The NIC bridges into the same VPC as a QEMU VM would. Firecracker uses
@@ -96,7 +102,7 @@ resource "lattice_public_ip" "fc" {
 resource "lattice_vm" "fc" {
   name      = "fc-01"
   vm_type   = "firecracker"
-  kernel_id = data.lattice_kernel.alpine.id
+  kernel_id = lattice_kernel_catalog_import.fc.id
   cpus      = 2
   memory_mb = 1024
 
@@ -116,9 +122,9 @@ resource "lattice_vm" "fc" {
   ]
 }
 
-output "kernel_distro_version" {
-  value       = data.lattice_kernel.alpine.resolved_distro_version
-  description = "Alpine release version of the selected kernel"
+output "kernel_version" {
+  value       = lattice_kernel_catalog_import.fc.version
+  description = "Version of the imported Firecracker kernel"
 }
 
 output "fc_vm_id" {

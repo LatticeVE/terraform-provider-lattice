@@ -1,28 +1,39 @@
 # lattice_kube_cluster
 
-Provisions a managed Kubernetes cluster running Talos Linux on LatticeVE. Creation is asynchronous — the resource polls until the cluster reaches `ready` or `failed` status (30-minute timeout).
+Provisions a LatticeKube cluster — a k3s control plane and workers running as Firecracker microVMs on LatticeVE. Creation is asynchronous — the resource polls until the cluster reaches `ready` or `failed` status (30-minute timeout).
 
-Worker count, Talos version, and Kubernetes version can be updated in-place. All other arguments require cluster replacement.
+Worker count and control-plane count can be scaled in place. Control-plane counts must remain `1`, `3`, or `5`, and only scale-out is supported. Kubernetes upgrades are performed by changing `rootfs_id` to a newer, upgrade-compatible `lattice_k3s_rootfs_image`; the provider waits for the controller's rolling control-plane and worker upgrade to finish.
 
 ## Example Usage
 
 ```hcl
-data "lattice_kube_releases" "all" {}
+resource "lattice_k3s_kernel" "kube" {
+  arch = "amd64"
+  # version = "6.1.175" # optional production pin
+}
+
+resource "lattice_k3s_rootfs_image" "release" {
+  arch    = "amd64"
+  version = "v1.36.2+k3s1-r23"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
 
 resource "lattice_public_ip_pool" "kube" {
   name      = "kube-pool"
-  interface = "eth0"
-  cidr      = "192.168.100.128/27"
+  interface = "br0"
+  cidr      = "10.0.7.128/28"
 }
 
 resource "lattice_kube_cluster" "prod" {
-  name          = "prod"
-  talos_image   = "/var/lib/lattice/images/talos-v1.9.0-metal-amd64.raw"
-  talos_version = data.lattice_kube_releases.all.releases[0].version
-  k8s_version   = data.lattice_kube_releases.all.releases[0].k8s_version
-  pool_id       = lattice_public_ip_pool.kube.id
-  cni           = "cilium"
-  lb_mode       = "cilium"
+  name      = "prod"
+  kernel_id = lattice_k3s_kernel.kube.id
+  rootfs_id = lattice_k3s_rootfs_image.release.id
+  pool_id   = lattice_public_ip_pool.kube.id
+  cni       = "flannel"
+  lb_mode   = "ccm"
 
   cp_count     = 3
   cp_vcpus     = 4
@@ -41,6 +52,8 @@ output "kubeconfig" {
 }
 ```
 
+The pool CIDR must be reserved inside the selected external bridge's connected IPv4 subnet and excluded from upstream DHCP. The cluster allocates and manages its own API endpoint address from `pool_id`; do not create a separate `lattice_public_ip` for it.
+
 ## Scale-out Example
 
 ```hcl
@@ -50,28 +63,49 @@ resource "lattice_kube_cluster" "prod" {
 }
 ```
 
-## Upgrade Example
+Control-plane scale-out uses the same resource:
 
 ```hcl
 resource "lattice_kube_cluster" "prod" {
   # ... other arguments unchanged ...
-  talos_version = "v1.9.1"
-  k8s_version   = "v1.32.2"
+  cp_count = 3 # supported transitions: 1 -> 3 -> 5
 }
 ```
 
-Version downgrades are rejected by the API.
+## Upgrade Example
+
+Change the pinned rootfs image to the next supported Kubernetes patch or minor release and apply:
+
+```hcl
+resource "lattice_k3s_rootfs_image" "release" {
+  arch    = "amd64"
+  version = "v1.36.2+k3s1-r23"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "lattice_kube_cluster" "prod" {
+  # ...
+  rootfs_id = lattice_k3s_rootfs_image.release.id
+}
+```
+
+LatticeVE validates the upgrade path, snapshots etcd, upgrades HA control planes one at a time with an etcd/API health check between nodes, then drains, upgrades, and uncordons workers. Terraform waits for `ready`; `failed` and `upgrade_blocked` are returned as apply errors while preserving the cluster for operator recovery.
 
 ## Argument Reference
 
 - `name` (Required, Forces new resource) — Cluster name.
-- `talos_image` (Required, Forces new resource) — Path to the Talos metal disk image on the LatticeVE host.
-- `talos_version` (Optional, Computed) — Talos version tag, e.g. `v1.9.0`. Upgradeable.
-- `k8s_version` (Optional, Computed) — Kubernetes version, e.g. `v1.32.0`. Upgradeable.
+- `runtime` (Optional, Computed, Forces new resource) — VM backend for cluster nodes. Only `firecracker` is supported.
+- `kernel_id` (Optional, Computed, Forces new resource) — Kubernetes-compatible Firecracker kernel UUID, normally from `lattice_k3s_kernel`.
+- `rootfs_id` (Optional, Computed) — Rootfs image UUID from `lattice_rootfs_image` or `lattice_k3s_rootfs_image`. Changing it invokes the safe in-place upgrade/revision workflow.
+- `storage` (Optional, Computed, Forces new resource) — Named storage backend for cluster VM disks. Empty uses the default backend.
+- `k8s_version` (Optional, Computed) — Kubernetes version, e.g. `v1.32.0`. Inferred from the rootfs image's name/description when omitted.
 - `cni` (Optional, Computed, Forces new resource) — CNI plugin: `flannel`, `cilium`, or `none`.
 - `lb_mode` (Optional, Computed, Forces new resource) — Load-balancer mode: `ccm`, `metallb`, or `cilium`.
 - `pool_id` (Optional, Forces new resource) — Public IP pool ID for the control-plane floating IP.
-- `cp_count` (Optional, Computed, Forces new resource) — Control-plane node count (odd numbers recommended).
+- `cp_count` (Optional, Computed) — Control-plane node count. Must be 1, 3, or 5. Scale-out is in place; scale-down is rejected.
 - `worker_count` (Optional, Computed) — Worker node count. **Updatable** — increase to scale out, decrease to scale in.
 - `cp_vcpus` (Optional, Computed, Forces new resource) — vCPUs per control-plane node.
 - `cp_memory_mb` (Optional, Computed, Forces new resource) — Memory per control-plane node in MiB.
@@ -83,11 +117,11 @@ Version downgrades are rejected by the API.
 ## Attribute Reference
 
 - `id` — Cluster UUID.
+- `kernel_version` — Linux kernel version used by cluster nodes.
 - `status` — Cluster lifecycle: `provisioning`, `ready`, `failed`, `deleting`.
 - `endpoint` — Kubernetes API server URL.
 - `public_ip` — Allocated public IP for the control plane.
 - `vpc_id` — VPC UUID created for this cluster.
 - `vpc_cidr` — CIDR assigned to the cluster VPC.
 - `kubeconfig` (Sensitive) — kubeconfig YAML for `kubectl` access.
-- `talosconfig` (Sensitive) — talosconfig YAML for `talosctl` access.
-- `nodes` — List of cluster nodes, each with `id`, `vm_id`, `role`, `ip`, `status`.
+- `nodes` — Cluster nodes with `id`, `vm_id`, `name`, `role`, `ip`, `status`, live `kubelet_version`, and any node-specific `upgrade_error`.

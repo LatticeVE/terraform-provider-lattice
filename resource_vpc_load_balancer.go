@@ -34,6 +34,8 @@ type VPCLoadBalancerResourceModel struct {
 type LBBackendModel struct {
 	ID      types.String `tfsdk:"id"`
 	Address types.String `tfsdk:"address"`
+	VMID    types.String `tfsdk:"vm_id"`
+	Port    types.Int64  `tfsdk:"port"`
 	Weight  types.Int64  `tfsdk:"weight"`
 }
 
@@ -90,7 +92,7 @@ func (r *VPCLoadBalancerResource) Schema(_ context.Context, _ resource.SchemaReq
 				PlanModifiers:       replaceString,
 			},
 			"backends": schema.ListNestedAttribute{
-				MarkdownDescription: "Backend targets as `ip:port` addresses.",
+				MarkdownDescription: "Backend targets. Prefer `vm_id` plus `port` so LatticeVE tracks VM IP changes; use `address` for an explicit `ip:port` target.",
 				Required:            true,
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.RequiresReplace(),
@@ -102,7 +104,18 @@ func (r *VPCLoadBalancerResource) Schema(_ context.Context, _ resource.SchemaReq
 						},
 						"address": schema.StringAttribute{
 							MarkdownDescription: "Backend address in `ip:port` form.",
-							Required:            true,
+							Optional:            true,
+							Computed:            true,
+						},
+						"vm_id": schema.StringAttribute{
+							MarkdownDescription: "Managed backend VM UUID. Use with `port` instead of `address`.",
+							Optional:            true,
+							Computed:            true,
+						},
+						"port": schema.Int64Attribute{
+							MarkdownDescription: "Backend port for a VM-backed target.",
+							Optional:            true,
+							Computed:            true,
 						},
 						"weight": schema.Int64Attribute{
 							MarkdownDescription: "Backend weight. Defaults to 1.",
@@ -201,6 +214,8 @@ func loadBalancerFromModel(m VPCLoadBalancerResourceModel) LoadBalancer {
 	for i, be := range m.Backends {
 		lb.Backends[i] = LBBackend{
 			Address: be.Address.ValueString(),
+			VMID:    be.VMID.ValueString(),
+			Port:    int(be.Port.ValueInt64()),
 			Weight:  1,
 		}
 		if !be.Weight.IsNull() && !be.Weight.IsUnknown() {
@@ -222,6 +237,8 @@ func loadBalancerToModel(lb *LoadBalancer, m *VPCLoadBalancerResourceModel) {
 		m.Backends[i] = LBBackendModel{
 			ID:      types.StringValue(be.ID),
 			Address: types.StringValue(be.Address),
+			VMID:    types.StringValue(be.VMID),
+			Port:    types.Int64Value(int64(be.Port)),
 			Weight:  types.Int64Value(int64(be.Weight)),
 		}
 	}

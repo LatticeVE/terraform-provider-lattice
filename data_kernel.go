@@ -19,18 +19,16 @@ type KernelDataSource struct {
 
 type KernelDataSourceModel struct {
 	// filters
-	Distro        types.String `tfsdk:"distro"`
-	DistroVersion types.String `tfsdk:"distro_version"`
-	Name          types.String `tfsdk:"name"`
-	Version       types.String `tfsdk:"version"`
-	VersionGlob   types.String `tfsdk:"version_glob"`
+	Distro      types.String `tfsdk:"distro"`
+	Name        types.String `tfsdk:"name"`
+	Version     types.String `tfsdk:"version"`
+	VersionGlob types.String `tfsdk:"version_glob"`
+	Arch        types.String `tfsdk:"arch"`
 	// computed
-	ID                    types.String `tfsdk:"id"`
-	ResolvedDistroVersion types.String `tfsdk:"resolved_distro_version"`
-	BuiltAt               types.String `tfsdk:"built_at"`
-	SizeBytes             types.Int64  `tfsdk:"size_bytes"`
-	VmlinuzPath           types.String `tfsdk:"vmlinuz_path"`
-	InitramfsPath         types.String `tfsdk:"initramfs_path"`
+	ID          types.String `tfsdk:"id"`
+	CreatedAt   types.String `tfsdk:"created_at"`
+	SizeBytes   types.Int64  `tfsdk:"size_bytes"`
+	VmlinuzPath types.String `tfsdk:"vmlinuz_path"`
 }
 
 func NewKernelDataSource() datasource.DataSource {
@@ -43,14 +41,10 @@ func (d *KernelDataSource) Metadata(_ context.Context, req datasource.MetadataRe
 
 func (d *KernelDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Look up a kernel from the LatticeVE kernel catalog. At least one filter must be set. If multiple kernels match, the most recently built one is returned.",
+		MarkdownDescription: "Look up an already-imported kernel from `GET /kernels`. At least one filter must be set. If multiple kernels match, the most recently imported one is returned. To browse kernels available to import but not yet imported, use `lattice_kernel_catalog` instead.",
 		Attributes: map[string]schema.Attribute{
 			"distro": schema.StringAttribute{
-				MarkdownDescription: "Filter by distro name, e.g. `alpine`, `ubuntu`, `debian`, `fedora-coreos`, `talos`.",
-				Optional:            true,
-			},
-			"distro_version": schema.StringAttribute{
-				MarkdownDescription: "Filter by distro release version, e.g. `3.24.1` for Alpine or `26.04` for Ubuntu. This is the distro's own version number, not the upstream kernel version.",
+				MarkdownDescription: "Filter by distro name, e.g. `alpine`, `firecracker`.",
 				Optional:            true,
 			},
 			"name": schema.StringAttribute{
@@ -58,35 +52,31 @@ func (d *KernelDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 				Optional:            true,
 			},
 			"version": schema.StringAttribute{
-				MarkdownDescription: "Filter by exact upstream kernel version, e.g. `6.12.9`. Mutually exclusive with `version_glob`.",
+				MarkdownDescription: "Filter by exact kernel version. Mutually exclusive with `version_glob`.",
 				Optional:            true,
 			},
 			"version_glob": schema.StringAttribute{
-				MarkdownDescription: "Glob pattern matched against the upstream kernel version, e.g. `6.12.*` or `6.*`. Returns the newest match. Mutually exclusive with `version`.",
+				MarkdownDescription: "Glob pattern matched against the kernel version, e.g. `6.12.*` or `6.*`. Returns the newest match. Mutually exclusive with `version`.",
+				Optional:            true,
+			},
+			"arch": schema.StringAttribute{
+				MarkdownDescription: "Filter by architecture: `amd64` or `arm64`.",
 				Optional:            true,
 			},
 			"id": schema.StringAttribute{
-				MarkdownDescription: "Kernel UUID — use this as `kernel_id` in `lattice_vm`.",
+				MarkdownDescription: "Kernel UUID — use this as `kernel_id` in `lattice_vm` or `lattice_kube_cluster`.",
 				Computed:            true,
 			},
-			"resolved_distro_version": schema.StringAttribute{
-				MarkdownDescription: "Distro release version of the selected kernel, e.g. `3.24.1` or `26.04`.",
-				Computed:            true,
-			},
-			"built_at": schema.StringAttribute{
-				MarkdownDescription: "ISO 8601 timestamp when the kernel was built or imported.",
+			"created_at": schema.StringAttribute{
+				MarkdownDescription: "ISO 8601 timestamp when the kernel was imported.",
 				Computed:            true,
 			},
 			"size_bytes": schema.Int64Attribute{
-				MarkdownDescription: "Combined size of vmlinuz + initramfs in bytes.",
+				MarkdownDescription: "Size of the kernel image in bytes.",
 				Computed:            true,
 			},
 			"vmlinuz_path": schema.StringAttribute{
 				MarkdownDescription: "Host path to the kernel image.",
-				Computed:            true,
-			},
-			"initramfs_path": schema.StringAttribute{
-				MarkdownDescription: "Host path to the initramfs image.",
 				Computed:            true,
 			},
 		},
@@ -112,8 +102,8 @@ func (d *KernelDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		return
 	}
 
-	if data.Distro.IsNull() && data.DistroVersion.IsNull() && data.Name.IsNull() && data.Version.IsNull() && data.VersionGlob.IsNull() {
-		resp.Diagnostics.AddError("No Filter Specified", "At least one of distro, distro_version, name, version, or version_glob must be set.")
+	if data.Distro.IsNull() && data.Name.IsNull() && data.Version.IsNull() && data.VersionGlob.IsNull() && data.Arch.IsNull() {
+		resp.Diagnostics.AddError("No Filter Specified", "At least one of distro, name, version, version_glob, or arch must be set.")
 		return
 	}
 	if !data.Version.IsNull() && !data.VersionGlob.IsNull() {
@@ -132,13 +122,13 @@ func (d *KernelDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		if !data.Distro.IsNull() && k.Distro != data.Distro.ValueString() {
 			continue
 		}
-		if !data.DistroVersion.IsNull() && k.DistroVersion != data.DistroVersion.ValueString() {
-			continue
-		}
 		if !data.Name.IsNull() && k.Name != data.Name.ValueString() {
 			continue
 		}
 		if !data.Version.IsNull() && k.Version != data.Version.ValueString() {
+			continue
+		}
+		if !data.Arch.IsNull() && k.Arch != data.Arch.ValueString() {
 			continue
 		}
 		if !data.VersionGlob.IsNull() {
@@ -152,26 +142,24 @@ func (d *KernelDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 
 	if len(matched) == 0 {
 		resp.Diagnostics.AddError("No Kernel Found", fmt.Sprintf(
-			"No kernel matched filters (distro=%q name=%q version=%q version_glob=%q).",
+			"No kernel matched filters (distro=%q name=%q version=%q version_glob=%q arch=%q).",
 			data.Distro.ValueString(), data.Name.ValueString(),
-			data.Version.ValueString(), data.VersionGlob.ValueString()))
+			data.Version.ValueString(), data.VersionGlob.ValueString(), data.Arch.ValueString()))
 		return
 	}
 
-	// Pick most recently built.
+	// Pick most recently imported.
 	best := matched[0]
 	for _, k := range matched[1:] {
-		if k.BuiltAt.After(best.BuiltAt) {
+		if k.CreatedAt.After(best.CreatedAt) {
 			best = k
 		}
 	}
 
 	data.ID = types.StringValue(best.ID)
-	data.ResolvedDistroVersion = types.StringValue(best.DistroVersion)
-	data.BuiltAt = types.StringValue(best.BuiltAt.Format("2006-01-02T15:04:05Z"))
+	data.CreatedAt = types.StringValue(best.CreatedAt.Format("2006-01-02T15:04:05Z"))
 	data.SizeBytes = types.Int64Value(best.SizeBytes)
 	data.VmlinuzPath = types.StringValue(best.VmlinuzPath)
-	data.InitramfsPath = types.StringValue(best.InitramfsPath)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

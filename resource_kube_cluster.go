@@ -22,38 +22,43 @@ type KubeClusterResource struct {
 }
 
 type KubeClusterResourceModel struct {
-	ID             types.String     `tfsdk:"id"`
-	Name           types.String     `tfsdk:"name"`
-	TalosImage     types.String     `tfsdk:"talos_image"`
-	TalosVersion   types.String     `tfsdk:"talos_version"`
-	K8sVersion     types.String     `tfsdk:"k8s_version"`
-	CNI            types.String     `tfsdk:"cni"`
-	LBMode         types.String     `tfsdk:"lb_mode"`
-	PoolID         types.String     `tfsdk:"pool_id"`
-	CPCount        types.Int64      `tfsdk:"cp_count"`
-	WorkerCount    types.Int64      `tfsdk:"worker_count"`
-	CPVCPUs        types.Int64      `tfsdk:"cp_vcpus"`
-	CPMemoryMB     types.Int64      `tfsdk:"cp_memory_mb"`
-	CPDiskGB       types.Int64      `tfsdk:"cp_disk_gb"`
-	WorkerVCPUs    types.Int64      `tfsdk:"worker_vcpus"`
-	WorkerMemoryMB types.Int64      `tfsdk:"worker_memory_mb"`
-	WorkerDiskGB   types.Int64      `tfsdk:"worker_disk_gb"`
-	Status         types.String     `tfsdk:"status"`
-	Endpoint       types.String     `tfsdk:"endpoint"`
-	PublicIP       types.String     `tfsdk:"public_ip"`
-	VPCID          types.String     `tfsdk:"vpc_id"`
-	VPCCIDR        types.String     `tfsdk:"vpc_cidr"`
-	Kubeconfig     types.String     `tfsdk:"kubeconfig"`
-	Talosconfig    types.String     `tfsdk:"talosconfig"`
-	Nodes          []KubeNodeModel  `tfsdk:"nodes"`
+	ID             types.String    `tfsdk:"id"`
+	Name           types.String    `tfsdk:"name"`
+	Runtime        types.String    `tfsdk:"runtime"`
+	KernelID       types.String    `tfsdk:"kernel_id"`
+	KernelVersion  types.String    `tfsdk:"kernel_version"`
+	RootfsID       types.String    `tfsdk:"rootfs_id"`
+	Storage        types.String    `tfsdk:"storage"`
+	K8sVersion     types.String    `tfsdk:"k8s_version"`
+	CNI            types.String    `tfsdk:"cni"`
+	LBMode         types.String    `tfsdk:"lb_mode"`
+	PoolID         types.String    `tfsdk:"pool_id"`
+	CPCount        types.Int64     `tfsdk:"cp_count"`
+	WorkerCount    types.Int64     `tfsdk:"worker_count"`
+	CPVCPUs        types.Int64     `tfsdk:"cp_vcpus"`
+	CPMemoryMB     types.Int64     `tfsdk:"cp_memory_mb"`
+	CPDiskGB       types.Int64     `tfsdk:"cp_disk_gb"`
+	WorkerVCPUs    types.Int64     `tfsdk:"worker_vcpus"`
+	WorkerMemoryMB types.Int64     `tfsdk:"worker_memory_mb"`
+	WorkerDiskGB   types.Int64     `tfsdk:"worker_disk_gb"`
+	Status         types.String    `tfsdk:"status"`
+	Endpoint       types.String    `tfsdk:"endpoint"`
+	PublicIP       types.String    `tfsdk:"public_ip"`
+	VPCID          types.String    `tfsdk:"vpc_id"`
+	VPCCIDR        types.String    `tfsdk:"vpc_cidr"`
+	Kubeconfig     types.String    `tfsdk:"kubeconfig"`
+	Nodes          []KubeNodeModel `tfsdk:"nodes"`
 }
 
 type KubeNodeModel struct {
-	ID     types.String `tfsdk:"id"`
-	VMID   types.String `tfsdk:"vm_id"`
-	Role   types.String `tfsdk:"role"`
-	IP     types.String `tfsdk:"ip"`
-	Status types.String `tfsdk:"status"`
+	ID             types.String `tfsdk:"id"`
+	VMID           types.String `tfsdk:"vm_id"`
+	Name           types.String `tfsdk:"name"`
+	Role           types.String `tfsdk:"role"`
+	IP             types.String `tfsdk:"ip"`
+	Status         types.String `tfsdk:"status"`
+	KubeletVersion types.String `tfsdk:"kubelet_version"`
+	UpgradeError   types.String `tfsdk:"upgrade_error"`
 }
 
 func NewKubeClusterResource() resource.Resource {
@@ -66,7 +71,7 @@ func (r *KubeClusterResource) Metadata(ctx context.Context, req resource.Metadat
 
 func (r *KubeClusterResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages a LatticeVE Kubernetes cluster.",
+		MarkdownDescription: "Manages a LatticeVE LatticeKube cluster — a k3s control plane and workers running as Firecracker microVMs.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "The unique UUID of the Kubernetes cluster.",
@@ -82,23 +87,44 @@ func (r *KubeClusterResource) Schema(ctx context.Context, req resource.SchemaReq
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"talos_image": schema.StringAttribute{
-				MarkdownDescription: "Path to the Talos disk image on the host.",
-				Required:            true,
+			"runtime": schema.StringAttribute{
+				MarkdownDescription: "VM backend for cluster nodes. Only `firecracker` is supported.",
+				Optional:            true,
+				Computed:            true,
 				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"talos_version": schema.StringAttribute{
-				MarkdownDescription: "Talos version string, e.g. \"v1.9.0\". Can be upgraded in-place.",
+			"kernel_id": schema.StringAttribute{
+				MarkdownDescription: "Firecracker kernel UUID from `lattice_kernel` / `lattice_kernel_catalog_import`. Omit to use the controller's built-in k3s kernel.",
+				Optional:            true,
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"kernel_version": schema.StringAttribute{MarkdownDescription: "Linux kernel version captured for cluster nodes.", Computed: true},
+			"rootfs_id": schema.StringAttribute{
+				MarkdownDescription: "Rootfs image UUID from `lattice_rootfs_image` / `lattice_k3s_rootfs_image`, carrying the k3s version. Changing this performs a safe rolling upgrade when the image version is newer, or updates the image revision when the Kubernetes version is unchanged.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"storage": schema.StringAttribute{
+				MarkdownDescription: "Named storage backend for cluster VM disks. Empty uses the default backend.",
+				Optional:            true,
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
 			"k8s_version": schema.StringAttribute{
-				MarkdownDescription: "Kubernetes version string, e.g. \"v1.32.0\". Can be upgraded in-place.",
+				MarkdownDescription: "Kubernetes version string, e.g. \"v1.32.0\". Inferred from the rootfs image name/description when omitted.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
@@ -131,12 +157,11 @@ func (r *KubeClusterResource) Schema(ctx context.Context, req resource.SchemaReq
 				},
 			},
 			"cp_count": schema.Int64Attribute{
-				MarkdownDescription: "Number of control plane nodes.",
+				MarkdownDescription: "Number of control plane nodes. Must be 1, 3, or 5 (odd, for etcd quorum). Increasing the count scales out in place; control-plane scale-down is rejected by the API.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.UseStateForUnknown(),
-					int64planmodifier.RequiresReplace(),
 				},
 			},
 			"worker_count": schema.Int64Attribute{
@@ -226,11 +251,6 @@ func (r *KubeClusterResource) Schema(ctx context.Context, req resource.SchemaReq
 				Computed:            true,
 				Sensitive:           true,
 			},
-			"talosconfig": schema.StringAttribute{
-				MarkdownDescription: "Talosconfig YAML for managing Talos nodes.",
-				Computed:            true,
-				Sensitive:           true,
-			},
 			"nodes": schema.ListNestedAttribute{
 				MarkdownDescription: "List of nodes in the cluster.",
 				Computed:            true,
@@ -244,6 +264,7 @@ func (r *KubeClusterResource) Schema(ctx context.Context, req resource.SchemaReq
 							MarkdownDescription: "VM UUID backing this node.",
 							Computed:            true,
 						},
+						"name": schema.StringAttribute{MarkdownDescription: "Kubernetes/VM node name.", Computed: true},
 						"role": schema.StringAttribute{
 							MarkdownDescription: "Node role: \"controlplane\" or \"worker\".",
 							Computed:            true,
@@ -256,6 +277,8 @@ func (r *KubeClusterResource) Schema(ctx context.Context, req resource.SchemaReq
 							MarkdownDescription: "Node status.",
 							Computed:            true,
 						},
+						"kubelet_version": schema.StringAttribute{MarkdownDescription: "Version currently reported by the node kubelet.", Computed: true},
+						"upgrade_error":   schema.StringAttribute{MarkdownDescription: "Last node-specific upgrade error, if any.", Computed: true},
 					},
 				},
 			},
@@ -290,10 +313,21 @@ func (r *KubeClusterResource) Create(ctx context.Context, req resource.CreateReq
 	}
 
 	createReq := KubeCreateRequest{
-		Name:       plan.Name.ValueString(),
-		TalosImage: plan.TalosImage.ValueString(),
+		Name: plan.Name.ValueString(),
 	}
 
+	if !plan.Runtime.IsNull() && !plan.Runtime.IsUnknown() {
+		createReq.Runtime = plan.Runtime.ValueString()
+	}
+	if !plan.KernelID.IsNull() && !plan.KernelID.IsUnknown() {
+		createReq.KernelID = plan.KernelID.ValueString()
+	}
+	if !plan.RootfsID.IsNull() && !plan.RootfsID.IsUnknown() {
+		createReq.RootfsID = plan.RootfsID.ValueString()
+	}
+	if !plan.Storage.IsNull() && !plan.Storage.IsUnknown() {
+		createReq.Storage = plan.Storage.ValueString()
+	}
 	if !plan.CPCount.IsNull() && !plan.CPCount.IsUnknown() {
 		createReq.CPCount = int(plan.CPCount.ValueInt64())
 	}
@@ -326,9 +360,6 @@ func (r *KubeClusterResource) Create(ctx context.Context, req resource.CreateReq
 	}
 	if !plan.PoolID.IsNull() && !plan.PoolID.IsUnknown() {
 		createReq.PoolID = plan.PoolID.ValueString()
-	}
-	if !plan.TalosVersion.IsNull() && !plan.TalosVersion.IsUnknown() {
-		createReq.TalosVersion = plan.TalosVersion.ValueString()
 	}
 	if !plan.K8sVersion.IsNull() && !plan.K8sVersion.IsUnknown() {
 		createReq.K8sVersion = plan.K8sVersion.ValueString()
@@ -376,13 +407,7 @@ ready:
 		return
 	}
 
-	talosconfig, err := r.client.GetTalosconfig(clusterID)
-	if err != nil {
-		resp.Diagnostics.AddError("Error Fetching Talosconfig", err.Error())
-		return
-	}
-
-	kubeClusterToState(cluster, kubeconfig, talosconfig, &plan)
+	kubeClusterToState(cluster, kubeconfig, &plan)
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -408,7 +433,6 @@ func (r *KubeClusterResource) Read(ctx context.Context, req resource.ReadRequest
 	}
 
 	kubeconfig := state.Kubeconfig.ValueString()
-	talosconfig := state.Talosconfig.ValueString()
 
 	if cluster.Status != "provisioning" {
 		kubeconfig, err = r.client.GetKubeconfig(cluster.ID)
@@ -416,15 +440,9 @@ func (r *KubeClusterResource) Read(ctx context.Context, req resource.ReadRequest
 			resp.Diagnostics.AddError("Error Fetching Kubeconfig", err.Error())
 			return
 		}
-
-		talosconfig, err = r.client.GetTalosconfig(cluster.ID)
-		if err != nil {
-			resp.Diagnostics.AddError("Error Fetching Talosconfig", err.Error())
-			return
-		}
 	}
 
-	kubeClusterToState(cluster, kubeconfig, talosconfig, &state)
+	kubeClusterToState(cluster, kubeconfig, &state)
 
 	diags = resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)
@@ -443,15 +461,19 @@ func (r *KubeClusterResource) Update(ctx context.Context, req resource.UpdateReq
 
 	patchReq := KubePatchRequest{}
 
+	if !plan.CPCount.Equal(state.CPCount) {
+		cp := int(plan.CPCount.ValueInt64())
+		patchReq.CPCount = &cp
+	}
 	if !plan.WorkerCount.Equal(state.WorkerCount) {
 		wc := int(plan.WorkerCount.ValueInt64())
 		patchReq.WorkerCount = &wc
 	}
-	if !plan.TalosVersion.Equal(state.TalosVersion) && !plan.TalosVersion.IsNull() && !plan.TalosVersion.IsUnknown() {
-		patchReq.TalosVersion = plan.TalosVersion.ValueString()
-	}
 	if !plan.K8sVersion.Equal(state.K8sVersion) && !plan.K8sVersion.IsNull() && !plan.K8sVersion.IsUnknown() {
 		patchReq.K8sVersion = plan.K8sVersion.ValueString()
+	}
+	if !plan.RootfsID.Equal(state.RootfsID) && !plan.RootfsID.IsNull() && !plan.RootfsID.IsUnknown() {
+		patchReq.RootfsID = plan.RootfsID.ValueString()
 	}
 
 	cluster, err := r.client.PatchKubeCluster(state.ID.ValueString(), patchReq)
@@ -460,13 +482,48 @@ func (r *KubeClusterResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
-	kubeconfig := state.Kubeconfig.ValueString()
-	talosconfig := state.Talosconfig.ValueString()
+	cluster, err = r.waitForReady(ctx, cluster.ID, 45*time.Minute)
+	if err != nil {
+		resp.Diagnostics.AddError("Kubernetes Cluster Update Failed", err.Error())
+		return
+	}
 
-	kubeClusterToState(cluster, kubeconfig, talosconfig, &state)
+	kubeconfig, err := r.client.GetKubeconfig(cluster.ID)
+	if err != nil {
+		resp.Diagnostics.AddError("Error Fetching Kubeconfig", err.Error())
+		return
+	}
+
+	kubeClusterToState(cluster, kubeconfig, &state)
 
 	diags = resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)
+}
+
+func (r *KubeClusterResource) waitForReady(ctx context.Context, id string, timeout time.Duration) (*KubeCluster, error) {
+	pollCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		cluster, err := r.client.GetKubeCluster(id)
+		if err != nil {
+			return nil, err
+		}
+		switch cluster.Status {
+		case "ready":
+			return cluster, nil
+		case "failed", "upgrade_blocked":
+			return nil, fmt.Errorf("cluster %s entered %s state: %s", id, cluster.Status, cluster.ErrorMsg)
+		}
+
+		select {
+		case <-pollCtx.Done():
+			return nil, fmt.Errorf("timed out waiting for cluster %s to become ready: %w", id, pollCtx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func (r *KubeClusterResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -485,11 +542,15 @@ func (r *KubeClusterResource) Delete(ctx context.Context, req resource.DeleteReq
 	}
 }
 
-func kubeClusterToState(cluster *KubeCluster, kubeconfig, talosconfig string, state *KubeClusterResourceModel) {
+func kubeClusterToState(cluster *KubeCluster, kubeconfig string, state *KubeClusterResourceModel) {
 	state.ID = types.StringValue(cluster.ID)
 	state.Name = types.StringValue(cluster.Name)
 	state.Status = types.StringValue(cluster.Status)
-	state.TalosVersion = types.StringValue(cluster.TalosVersion)
+	state.Runtime = types.StringValue(cluster.Runtime)
+	state.KernelID = types.StringValue(cluster.KernelID)
+	state.KernelVersion = types.StringValue(cluster.KernelVersion)
+	state.RootfsID = types.StringValue(cluster.RootfsID)
+	state.Storage = types.StringValue(cluster.Storage)
 	state.K8sVersion = types.StringValue(cluster.K8sVersion)
 	state.CNI = types.StringValue(cluster.CNI)
 	state.LBMode = types.StringValue(cluster.LBMode)
@@ -506,16 +567,18 @@ func kubeClusterToState(cluster *KubeCluster, kubeconfig, talosconfig string, st
 	state.WorkerMemoryMB = types.Int64Value(int64(cluster.WorkerMemMB))
 	state.WorkerDiskGB = types.Int64Value(int64(cluster.WorkerDiskGB))
 	state.Kubeconfig = types.StringValue(kubeconfig)
-	state.Talosconfig = types.StringValue(talosconfig)
 
 	state.Nodes = make([]KubeNodeModel, len(cluster.Nodes))
 	for i, n := range cluster.Nodes {
 		state.Nodes[i] = KubeNodeModel{
-			ID:     types.StringValue(n.ID),
-			VMID:   types.StringValue(n.VMID),
-			Role:   types.StringValue(n.Role),
-			IP:     types.StringValue(n.IP),
-			Status: types.StringValue(n.Status),
+			ID:             types.StringValue(n.ID),
+			VMID:           types.StringValue(n.VMID),
+			Name:           types.StringValue(n.Name),
+			Role:           types.StringValue(n.Role),
+			IP:             types.StringValue(n.IP),
+			Status:         types.StringValue(n.Status),
+			KubeletVersion: types.StringValue(n.KubeletVersion),
+			UpgradeError:   types.StringValue(n.UpgradeError),
 		}
 	}
 }

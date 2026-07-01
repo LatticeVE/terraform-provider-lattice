@@ -7,7 +7,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -52,47 +51,26 @@ func (r *IPAMPoolResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 			},
 			"name": schema.StringAttribute{
 				Required: true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"bridge": schema.StringAttribute{
 				Required: true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"subnet": schema.StringAttribute{
 				Required: true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"gateway": schema.StringAttribute{
 				Required: true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"range_start": schema.StringAttribute{
 				Required: true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"range_end": schema.StringAttribute{
 				Required: true,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
 			},
 			"dns": schema.ListAttribute{
 				ElementType: types.StringType,
 				Optional:    true,
 				Computed:    true,
-				PlanModifiers: []planmodifier.List{
-					listplanmodifier.RequiresReplace(),
-				},
 			},
 			"created_at": schema.StringAttribute{
 				Computed: true,
@@ -171,9 +149,21 @@ func (r *IPAMPoolResource) Read(ctx context.Context, req resource.ReadRequest, r
 }
 
 func (r *IPAMPoolResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	// All fields are RequiresReplace; Update is never called.
 	var data IPAMPoolModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	var dns []string
+	resp.Diagnostics.Append(data.DNS.ElementsAs(ctx, &dns, false)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	pool := IPAMPool{ID: data.ID.ValueString(), Name: data.Name.ValueString(), Bridge: data.Bridge.ValueString(), Subnet: data.Subnet.ValueString(), Gateway: data.Gateway.ValueString(), RangeStart: data.RangeStart.ValueString(), RangeEnd: data.RangeEnd.ValueString(), DNS: dns}
+	if err := r.client.UpdateIPAMPool(pool.ID, pool); err != nil {
+		resp.Diagnostics.AddError("Error Updating IPAM Pool", err.Error())
+		return
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 

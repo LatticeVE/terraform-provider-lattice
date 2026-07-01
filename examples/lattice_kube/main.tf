@@ -26,26 +26,36 @@ variable "lattice_api_key" {
   default     = ""
 }
 
-# Look up available Talos releases to pin a specific version
-data "lattice_kube_releases" "all" {}
+variable "public_bridge" {
+  description = "External Linux bridge reported by LatticeVE (for example br0 or vmbr0)"
+  type        = string
+  default     = "br0"
+}
 
-locals {
-  # Pick the latest stable Talos release
-  talos_version = data.lattice_kube_releases.all.releases[0].version
-  k8s_version   = data.lattice_kube_releases.all.releases[0].k8s_version
+variable "public_pool_cidr" {
+  description = "Reserved CIDR inside the external bridge subnet; exclude it from upstream DHCP"
+  type        = string
+}
+
+# Import the latest Kubernetes-compatible kernel and k3s rootfs. Pin `version`
+# in production when you need fully reproducible cluster builds.
+resource "lattice_k3s_kernel" "latest" {
+  arch = "amd64"
+}
+
+resource "lattice_k3s_rootfs_image" "latest" {
+  arch = "amd64"
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Public IP pool backed by a routable subnet on the host NIC
 resource "lattice_public_ip_pool" "kube" {
   name      = "kube-pool"
-  interface = "eth0"
-  cidr      = "192.168.100.128/27"
-}
-
-# Allocate a floating IP for the control-plane endpoint
-resource "lattice_public_ip" "cp_endpoint" {
-  pool_id     = lattice_public_ip_pool.kube.id
-  description = "k8s control-plane endpoint"
+  interface = var.public_bridge
+  cidr      = var.public_pool_cidr
 }
 
 # Storage backend (LINSTOR for replicated volumes)
@@ -58,20 +68,19 @@ resource "lattice_storage_backend" "linstor" {
   }
 }
 
-# Managed Kubernetes cluster
+# Managed LatticeKube cluster (k3s on Firecracker)
 resource "lattice_kube_cluster" "prod" {
-  name          = "prod"
-  talos_image   = "/var/lib/lattice/images/talos-v1.9.0-metal-amd64.raw"
-  talos_version = local.talos_version
-  k8s_version   = local.k8s_version
+  name      = "prod"
+  kernel_id = lattice_k3s_kernel.latest.id
+  rootfs_id = lattice_k3s_rootfs_image.latest.id
+  storage   = lattice_storage_backend.linstor.name
+  pool_id   = lattice_public_ip_pool.kube.id
 
-  pool_id = lattice_public_ip_pool.kube.id
+  cni     = "flannel"
+  lb_mode = "ccm"
 
-  cni     = "cilium"
-  lb_mode = "cilium"
-
-  cp_count  = 3
-  cp_vcpus  = 4
+  cp_count     = 3
+  cp_vcpus     = 4
   cp_memory_mb = 8192
   cp_disk_gb   = 50
 
@@ -79,13 +88,6 @@ resource "lattice_kube_cluster" "prod" {
   worker_vcpus     = 8
   worker_memory_mb = 16384
   worker_disk_gb   = 100
-}
-
-# LINSTOR-backed storage volume mounted into a VM
-resource "lattice_storage_volume" "data" {
-  name       = "prod-data-0"
-  size_gb    = 200
-  backend_id = lattice_storage_backend.linstor.id
 }
 
 output "kube_endpoint" {
@@ -99,13 +101,9 @@ output "kubeconfig" {
   sensitive   = true
 }
 
-output "talosconfig" {
-  description = "Talosconfig for talosctl access"
-  value       = lattice_kube_cluster.prod.talosconfig
-  sensitive   = true
-}
-
-output "public_ip" {
-  description = "Allocated control-plane public IP"
-  value       = lattice_public_ip.cp_endpoint.ip
+output "cluster_images" {
+  value = {
+    kernel = lattice_k3s_kernel.latest.version
+    rootfs = lattice_k3s_rootfs_image.latest.version
+  }
 }

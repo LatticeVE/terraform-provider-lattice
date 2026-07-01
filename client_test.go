@@ -54,6 +54,41 @@ func TestClient_ListVMs(t *testing.T) {
 	}
 }
 
+func TestClient_GetVM(t *testing.T) {
+	expectedVMs := []VM{
+		{ID: "vm-1", Name: "test-vm-1", Status: StatusRunning},
+		{ID: "vm-2", Name: "test-vm-2", Status: StatusStopped},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(expectedVMs)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	vm, err := client.GetVM("vm-2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if vm.Name != "test-vm-2" {
+		t.Errorf("expected test-vm-2, got %s", vm.Name)
+	}
+}
+
+func TestClient_GetVM_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]VM{})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	if _, err := client.GetVM("missing"); err == nil {
+		t.Fatal("expected error for missing VM, got nil")
+	}
+}
+
 func TestClient_CreateVM(t *testing.T) {
 	inputName := "new-vm"
 	inputCPUs := 2

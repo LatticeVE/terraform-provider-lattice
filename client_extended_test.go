@@ -82,26 +82,24 @@ func TestClient_ListKernels(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	expected := []Kernel{
 		{
-			ID:            "kern-1",
-			Name:          "alpine-3.24.1",
-			Distro:        "alpine",
-			DistroVersion: "3.24.1",
-			Version:       "6.12.9",
-			VmlinuzPath:   "/kernels/alpine/vmlinuz",
-			InitramfsPath: "/kernels/alpine/initramfs",
-			SizeBytes:     10_000_000,
-			BuiltAt:       now,
+			ID:          "kern-1",
+			Name:        "alpine-3.24.1",
+			Distro:      "alpine",
+			Version:     "6.12.9",
+			Arch:        "amd64",
+			VmlinuzPath: "/kernels/alpine/vmlinuz",
+			SizeBytes:   10_000_000,
+			CreatedAt:   now,
 		},
 		{
-			ID:            "kern-2",
-			Name:          "ubuntu-26.04",
-			Distro:        "ubuntu",
-			DistroVersion: "26.04",
-			Version:       "6.14.0",
-			VmlinuzPath:   "/kernels/ubuntu/vmlinuz",
-			InitramfsPath: "/kernels/ubuntu/initramfs",
-			SizeBytes:     12_000_000,
-			BuiltAt:       now.Add(-time.Hour),
+			ID:          "kern-2",
+			Name:        "ubuntu-26.04",
+			Distro:      "ubuntu",
+			Version:     "6.14.0",
+			Arch:        "arm64",
+			VmlinuzPath: "/kernels/ubuntu/vmlinuz",
+			SizeBytes:   12_000_000,
+			CreatedAt:   now.Add(-time.Hour),
 		},
 	}
 
@@ -125,8 +123,8 @@ func TestClient_ListKernels(t *testing.T) {
 	if len(kernels) != 2 {
 		t.Fatalf("expected 2 kernels, got %d", len(kernels))
 	}
-	if kernels[0].DistroVersion != "3.24.1" {
-		t.Errorf("expected DistroVersion=3.24.1, got %s", kernels[0].DistroVersion)
+	if kernels[0].Arch != "amd64" {
+		t.Errorf("expected Arch=amd64, got %s", kernels[0].Arch)
 	}
 	if kernels[1].Version != "6.14.0" {
 		t.Errorf("expected Version=6.14.0, got %s", kernels[1].Version)
@@ -373,5 +371,280 @@ func TestClient_PublicIPCreateAndDelete(t *testing.T) {
 
 	if err := client.ReleasePublicIP("pip-1"); err != nil {
 		t.Errorf("ReleasePublicIP error: %v", err)
+	}
+}
+
+// ── Kernel catalog ────────────────────────────────────────────────────────────
+
+func TestClient_ListKernelCatalog(t *testing.T) {
+	expected := []KernelCatalogEntry{
+		{
+			ID:            "firecracker-6.1.141-amd64",
+			Name:          "Firecracker Kernel 6.1.141 (amd64)",
+			Distro:        "firecracker",
+			Version:       "6.1.141",
+			Arch:          "amd64",
+			VmlinuzURL:    "https://example.com/vmlinuz-6.1.141",
+			VmlinuzSizeMB: 8,
+			Imported:      false,
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/kernel-catalog" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(expected)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	entries, err := client.ListKernelCatalog()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 1 || entries[0].ID != "firecracker-6.1.141-amd64" {
+		t.Errorf("expected 1 entry with id firecracker-6.1.141-amd64, got %+v", entries)
+	}
+}
+
+func TestClient_ListKernelCatalog_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	if _, err := client.ListKernelCatalog(); err == nil {
+		t.Fatal("expected error for 500 response, got nil")
+	}
+}
+
+func TestClient_ImportKernelCatalogEntry(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/kernel-catalog/firecracker-6.1.141-amd64/import" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	if err := client.ImportKernelCatalogEntry("firecracker-6.1.141-amd64"); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestClient_ImportKernelCatalogEntry_Conflict(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "import already in progress"})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	if err := client.ImportKernelCatalogEntry("firecracker-6.1.141-amd64"); err == nil {
+		t.Fatal("expected error for 409 response, got nil")
+	}
+}
+
+func TestClient_KernelCatalogStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/kernel-catalog/firecracker-6.1.141-amd64/status" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(kernelCatalogStatus{
+			EntryID:  "firecracker-6.1.141-amd64",
+			Status:   "done",
+			Progress: 100,
+			Imported: true,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	status, err := client.KernelCatalogStatus("firecracker-6.1.141-amd64")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !status.Imported || status.Status != "done" {
+		t.Errorf("expected imported done status, got %+v", status)
+	}
+}
+
+func TestClient_DeleteKernel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/kernels/kern-1" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	if err := client.DeleteKernel("kern-1"); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// ── Rootfs images ─────────────────────────────────────────────────────────────
+
+func TestClient_ListRootfsImages(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	expected := []RootfsImage{
+		{
+			ID:         "rootfs-1",
+			Name:       "k3s v1.32.0+k3s1 rootfs (amd64)",
+			Arch:       "amd64",
+			RootfsPath: "/var/lib/latticeve/rootfs/rootfs-1-k3s-v1.32.0+k3s1-amd64.ext4",
+			SizeBytes:  500_000_000,
+			SHA256:     "deadbeef",
+			Source:     "latticeve-k3s-images",
+			Version:    "v1.32.0+k3s1",
+			CreatedAt:  now,
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/rootfs-images" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(expected)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	images, err := client.ListRootfsImages()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(images) != 1 || images[0].Source != "latticeve-k3s-images" {
+		t.Errorf("expected 1 k3s-sourced image, got %+v", images)
+	}
+}
+
+func TestClient_ListRootfsImages_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	if _, err := client.ListRootfsImages(); err == nil {
+		t.Fatal("expected error for 500 response, got nil")
+	}
+}
+
+func TestClient_DeleteRootfsImage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/rootfs-images/rootfs-1" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	if err := client.DeleteRootfsImage("rootfs-1"); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestClient_DiscoverK3sRootfs(t *testing.T) {
+	expected := []K3sRootfsDiscoveryEntry{
+		{Version: "v1.32.0+k3s1", Arch: "amd64", DownloadURL: "https://github.com/LatticeVE/latticeve-k3s-images/releases/download/k3s-v1.32.0%2Bk3s1-r1/k3s-v1.32.0+k3s1-amd64.ext4", SizeBytes: 500_000_000},
+		{Version: "v1.32.0+k3s1", Arch: "arm64", DownloadURL: "https://github.com/LatticeVE/latticeve-k3s-images/releases/download/k3s-v1.32.0%2Bk3s1-r1/k3s-v1.32.0+k3s1-arm64.ext4", SizeBytes: 480_000_000},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/rootfs-images/discover/k3s" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(expected)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	entries, err := client.DiscoverK3sRootfs()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[0].Arch != "amd64" || entries[1].Arch != "arm64" {
+		t.Errorf("expected amd64 then arm64, got %+v", entries)
+	}
+}
+
+func TestClient_DiscoverK3sRootfs_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "no rootfs assets found", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	if _, err := client.DiscoverK3sRootfs(); err == nil {
+		t.Fatal("expected error for 502 response, got nil")
+	}
+}
+
+func TestClient_ImportK3sRootfs(t *testing.T) {
+	entry := K3sRootfsDiscoveryEntry{
+		Version:     "v1.32.0+k3s1",
+		Arch:        "amd64",
+		DownloadURL: "https://github.com/LatticeVE/latticeve-k3s-images/releases/download/k3s-v1.32.0%2Bk3s1-r1/k3s-v1.32.0+k3s1-amd64.ext4",
+		SizeBytes:   500_000_000,
+	}
+	want := RootfsImage{
+		ID:        "rootfs-2",
+		Name:      "k3s v1.32.0+k3s1 rootfs (amd64)",
+		Arch:      "amd64",
+		Source:    "latticeve-k3s-images",
+		Version:   "v1.32.0+k3s1",
+		SizeBytes: 500_000_000,
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/rootfs-images/discover/k3s/import" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		var got K3sRootfsDiscoveryEntry
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decoding request body: %v", err)
+		}
+		if got != entry {
+			t.Errorf("expected request body %+v, got %+v", entry, got)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(want)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	img, err := client.ImportK3sRootfs(entry)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if img.ID != "rootfs-2" || img.Version != "v1.32.0+k3s1" {
+		t.Errorf("expected rootfs-2 v1.32.0+k3s1, got %+v", img)
+	}
+}
+
+func TestClient_ImportK3sRootfs_RejectsNonDiscoveredEntry(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "rootfs image must match a discovered latticeve-k3s-images release asset"})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key", true)
+	_, err := client.ImportK3sRootfs(K3sRootfsDiscoveryEntry{Version: "bogus", Arch: "amd64", DownloadURL: "https://example.com/bogus.ext4"})
+	if err == nil {
+		t.Fatal("expected error for 400 response, got nil")
 	}
 }

@@ -76,10 +76,10 @@ resource "lattice_ipam_pool" "app" {
   dns         = ["1.1.1.1", "8.8.8.8"]
 }
 
-# Public IP pool
+# Public IP pool; reserve this CIDR inside br0's connected subnet.
 resource "lattice_public_ip_pool" "app" {
   name      = "app-public"
-  interface = "eth0"
+  interface = "br0"
   cidr      = "192.168.200.64/26"
 }
 
@@ -149,6 +149,11 @@ resource "lattice_vm" "app" {
   cpus         = 4
   memory_mb    = 8192
   boot_disk_gb = 40
+}
+
+resource "lattice_vm_security_group" "app" {
+  vm_id             = lattice_vm.app.id
+  security_group_id = lattice_security_group.app.id
 }
 
 output "public_ip" {

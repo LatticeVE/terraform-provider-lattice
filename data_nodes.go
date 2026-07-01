@@ -17,8 +17,8 @@ type NodesDataSource struct {
 }
 
 type NodesDataSourceModel struct {
-	Arch  types.String      `tfsdk:"arch"`
-	Nodes []NodeModel       `tfsdk:"nodes"`
+	Arch  types.String `tfsdk:"arch"`
+	Nodes []NodeModel  `tfsdk:"nodes"`
 }
 
 type NodeModel struct {

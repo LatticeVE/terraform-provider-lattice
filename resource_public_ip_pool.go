@@ -53,14 +53,14 @@ func (r *PublicIPPoolResource) Schema(_ context.Context, _ resource.SchemaReques
 			},
 			"interface": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "Host NIC to bind this pool to, e.g. \"eth0\".",
+				MarkdownDescription: "Eligible external Linux bridge to bind this pool to, e.g. `br0` or `vmbr0`.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"cidr": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "CIDR block for this pool, e.g. \"192.168.1.200/27\".",
+				MarkdownDescription: "Canonical IPv4 CIDR reserved inside the selected bridge's connected subnet. It must not contain the bridge IP or overlap another managed network.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},

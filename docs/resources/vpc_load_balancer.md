@@ -17,7 +17,8 @@ resource "lattice_vpc_load_balancer" "web" {
 
   backends = [
     {
-      address = "10.10.0.10:8080"
+      vm_id   = lattice_vm.web_1.id
+      port    = 8080
       weight  = 100
     },
     {
@@ -37,7 +38,8 @@ resource "lattice_vpc_load_balancer" "web" {
 - `certificate_id` (Optional, Forces replacement) — Required for `https`; references `lattice_lb_certificate.id`.
 - `backend_protocol` (Optional, Forces replacement) — Backend protocol: `tcp` or `http`. Defaults server-side from `protocol`.
 - `backends` (Required, Forces replacement) — Backend targets:
-  - `address` (Required) — Backend address in `ip:port` form.
+  - `vm_id` + `port` — Preferred managed target. LatticeVE reconciles the backend if the VM's VPC address changes.
+  - `address` — Explicit backend address in `ip:port` form for unmanaged targets.
   - `weight` (Optional, Computed) — Backend weight. Defaults to `1`.
 
 ## Attribute Reference

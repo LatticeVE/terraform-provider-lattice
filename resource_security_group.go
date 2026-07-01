@@ -275,6 +275,12 @@ func (r *SecurityGroupResource) Update(ctx context.Context, req resource.UpdateR
 				resp.Diagnostics.AddError("Error Adding Security Group Rule", addErr.Error())
 				return
 			}
+			continue
+		}
+		rule := SGRule{Direction: rm.Direction.ValueString(), Protocol: rm.Protocol.ValueString(), PortFrom: int(rm.PortFrom.ValueInt64()), PortTo: int(rm.PortTo.ValueInt64()), CIDR: rm.CIDR.ValueString(), Action: rm.Action.ValueString(), Priority: int(rm.Priority.ValueInt64())}
+		if updateErr := r.client.UpdateSGRule(sg.ID, rm.ID.ValueString(), rule); updateErr != nil {
+			resp.Diagnostics.AddError("Error Updating Security Group Rule", updateErr.Error())
+			return
 		}
 	}
 

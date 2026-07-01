@@ -108,6 +108,13 @@ func (p *LatticeProvider) Resources(ctx context.Context) []func() resource.Resou
 		NewIPAMPoolResource,
 		NewLBCertificateResource,
 		NewVPCLoadBalancerResource,
+		NewKernelCatalogImportResource,
+		NewK3sRootfsImageResource,
+		NewK3sKernelResource,
+		NewIPAMLeaseResource,
+		NewAffinityGroupResource,
+		NewVMAffinityGroupResource,
+		NewVMSecurityGroupResource,
 	}
 }
 
@@ -115,11 +122,13 @@ func (p *LatticeProvider) DataSources(ctx context.Context) []func() datasource.D
 	return []func() datasource.DataSource{
 		NewVMDataSource,
 		NewVPCDataSource,
-		NewKubeReleasesDataSource,
 		NewPublicIPPoolsDataSource,
 		NewStorageBackendsDataSource,
 		NewKernelDataSource,
+		NewKernelCatalogDataSource,
 		NewImageDataSource,
+		NewRootfsImageDataSource,
 		NewNodesDataSource,
+		NewKubeClusterDataSource,
 	}
 }

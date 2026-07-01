@@ -18,7 +18,7 @@ resource "lattice_ipam_pool" "app" {
 
 ## Argument Reference
 
-All arguments force replacement if changed.
+Pool arguments are updated in place. LatticeVE revalidates the subnet, gateway, range, DNS values, and managed-network overlap before applying a change.
 
 - `name` (Required) — Pool name.
 - `bridge` (Required) — Host bridge interface (typically from `lattice_vpc.X.bridge`).

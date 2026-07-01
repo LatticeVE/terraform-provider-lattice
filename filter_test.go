@@ -142,28 +142,28 @@ func newestImage(images []Image) Image {
 
 // ── Kernel filtering ──────────────────────────────────────────────────────────
 
-func TestKernelFilter_ByDistroVersion(t *testing.T) {
+func TestKernelFilter_ByArch(t *testing.T) {
 	now := time.Now()
 	kernels := []Kernel{
-		{ID: "1", Distro: "alpine", DistroVersion: "3.24.1", Version: "6.12.9", BuiltAt: now.Add(-time.Hour)},
-		{ID: "2", Distro: "alpine", DistroVersion: "3.24.0", Version: "6.12.8", BuiltAt: now.Add(-2 * time.Hour)},
-		{ID: "3", Distro: "alpine", DistroVersion: "3.23.0", Version: "6.6.1", BuiltAt: now},
-		{ID: "4", Distro: "ubuntu", DistroVersion: "26.04", Version: "6.14.0", BuiltAt: now},
+		{ID: "1", Distro: "firecracker", Arch: "amd64", Version: "6.12.9", CreatedAt: now.Add(-time.Hour)},
+		{ID: "2", Distro: "firecracker", Arch: "arm64", Version: "6.12.8", CreatedAt: now.Add(-2 * time.Hour)},
+		{ID: "3", Distro: "firecracker", Arch: "amd64", Version: "6.6.1", CreatedAt: now},
+		{ID: "4", Distro: "alpine", Arch: "amd64", Version: "6.14.0", CreatedAt: now},
 	}
 
-	matched := filterKernels(kernels, "alpine", "3.24.1", "", "", "")
-	if len(matched) != 1 || matched[0].ID != "1" {
-		t.Errorf("expected kernel 1, got %+v", matched)
+	matched := filterKernels(kernels, "firecracker", "arm64", "6.12.8", "", "")
+	if len(matched) != 1 || matched[0].ID != "2" {
+		t.Errorf("expected kernel 2, got %+v", matched)
 	}
 }
 
 func TestKernelFilter_VersionGlob(t *testing.T) {
 	now := time.Now()
 	kernels := []Kernel{
-		{ID: "1", Distro: "alpine", Version: "6.12.8", BuiltAt: now.Add(-time.Hour)},
-		{ID: "2", Distro: "alpine", Version: "6.12.9", BuiltAt: now},
-		{ID: "3", Distro: "alpine", Version: "6.6.1", BuiltAt: now.Add(-2 * time.Hour)},
-		{ID: "4", Distro: "ubuntu", Version: "6.14.0", BuiltAt: now},
+		{ID: "1", Distro: "alpine", Version: "6.12.8", CreatedAt: now.Add(-time.Hour)},
+		{ID: "2", Distro: "alpine", Version: "6.12.9", CreatedAt: now},
+		{ID: "3", Distro: "alpine", Version: "6.6.1", CreatedAt: now.Add(-2 * time.Hour)},
+		{ID: "4", Distro: "ubuntu", Version: "6.14.0", CreatedAt: now},
 	}
 
 	matched := filterKernels(kernels, "alpine", "", "", "6.12.*", "")
@@ -179,9 +179,9 @@ func TestKernelFilter_VersionGlob(t *testing.T) {
 func TestKernelFilter_VersionGlobBroad(t *testing.T) {
 	now := time.Now()
 	kernels := []Kernel{
-		{ID: "1", Version: "6.12.9", BuiltAt: now.Add(-time.Hour)},
-		{ID: "2", Version: "6.14.0", BuiltAt: now},
-		{ID: "3", Version: "5.15.0", BuiltAt: now.Add(-2 * time.Hour)},
+		{ID: "1", Version: "6.12.9", CreatedAt: now.Add(-time.Hour)},
+		{ID: "2", Version: "6.14.0", CreatedAt: now},
+		{ID: "3", Version: "5.15.0", CreatedAt: now.Add(-2 * time.Hour)},
 	}
 
 	matched := filterKernels(kernels, "", "", "", "6.*", "")
@@ -193,8 +193,8 @@ func TestKernelFilter_VersionGlobBroad(t *testing.T) {
 func TestKernelFilter_ExactVersion(t *testing.T) {
 	now := time.Now()
 	kernels := []Kernel{
-		{ID: "1", Version: "6.12.9", BuiltAt: now},
-		{ID: "2", Version: "6.12.8", BuiltAt: now},
+		{ID: "1", Version: "6.12.9", CreatedAt: now},
+		{ID: "2", Version: "6.12.8", CreatedAt: now},
 	}
 
 	matched := filterKernels(kernels, "", "", "6.12.9", "", "")
@@ -206,11 +206,11 @@ func TestKernelFilter_ExactVersion(t *testing.T) {
 func TestKernelFilter_ByName(t *testing.T) {
 	now := time.Now()
 	kernels := []Kernel{
-		{ID: "1", Name: "talos-v1.9.0", BuiltAt: now},
-		{ID: "2", Name: "alpine-6.12.9", BuiltAt: now},
+		{ID: "1", Name: "firecracker-v6.1.0-amd64", CreatedAt: now},
+		{ID: "2", Name: "alpine-6.12.9", CreatedAt: now},
 	}
 
-	matched := filterKernels(kernels, "", "", "", "", "talos-v1.9.0")
+	matched := filterKernels(kernels, "", "", "", "", "firecracker-v6.1.0-amd64")
 	if len(matched) != 1 || matched[0].ID != "1" {
 		t.Errorf("expected name match, got %+v", matched)
 	}
@@ -218,7 +218,7 @@ func TestKernelFilter_ByName(t *testing.T) {
 
 func TestKernelFilter_NoMatch(t *testing.T) {
 	kernels := []Kernel{
-		{ID: "1", Distro: "alpine", Version: "6.12.9", BuiltAt: time.Now()},
+		{ID: "1", Distro: "alpine", Version: "6.12.9", CreatedAt: time.Now()},
 	}
 	matched := filterKernels(kernels, "ubuntu", "", "", "", "")
 	if len(matched) != 0 {
@@ -227,13 +227,13 @@ func TestKernelFilter_NoMatch(t *testing.T) {
 }
 
 // filterKernels mirrors the filter logic in data_kernel.go Read.
-func filterKernels(kernels []Kernel, distro, distroVersion, version, versionGlob, name string) []Kernel {
+func filterKernels(kernels []Kernel, distro, arch, version, versionGlob, name string) []Kernel {
 	var matched []Kernel
 	for _, k := range kernels {
 		if distro != "" && k.Distro != distro {
 			continue
 		}
-		if distroVersion != "" && k.DistroVersion != distroVersion {
+		if arch != "" && k.Arch != arch {
 			continue
 		}
 		if name != "" && k.Name != name {
@@ -256,7 +256,7 @@ func filterKernels(kernels []Kernel, distro, distroVersion, version, versionGlob
 func newestKernel(kernels []Kernel) Kernel {
 	best := kernels[0]
 	for _, k := range kernels[1:] {
-		if k.BuiltAt.After(best.BuiltAt) {
+		if k.CreatedAt.After(best.CreatedAt) {
 			best = k
 		}
 	}

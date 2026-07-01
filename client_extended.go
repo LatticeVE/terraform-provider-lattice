@@ -73,24 +73,109 @@ func (c *Client) ListImages() ([]Image, error) {
 	return images, c.getJSON(c.endpoint+"/images", &images)
 }
 
-// ── Kernel catalog ────────────────────────────────────────────────────────────
+// ── Kernels (imported) ────────────────────────────────────────────────────────
 
+// Kernel is an already-imported Firecracker kernel, as returned by
+// GET /kernels. Distinct from KernelCatalogEntry, which is a discoverable
+// but not-yet-imported catalog entry.
 type Kernel struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Distro        string    `json:"distro"`
-	DistroVersion string    `json:"distro_version,omitempty"`
-	Version       string    `json:"version"`
-	VmlinuzPath   string    `json:"vmlinuz_path"`
-	InitramfsPath string    `json:"initramfs_path"`
-	SourceURL     string    `json:"source_url,omitempty"`
-	SizeBytes     int64     `json:"size_bytes"`
-	BuiltAt       time.Time `json:"built_at"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Distro      string    `json:"distro,omitempty"`
+	Version     string    `json:"version,omitempty"`
+	Arch        string    `json:"arch"`
+	VmlinuzPath string    `json:"vmlinuz_path"`
+	SizeBytes   int64     `json:"size_bytes"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func (c *Client) ListKernels() ([]Kernel, error) {
 	var kernels []Kernel
 	return kernels, c.getJSON(c.endpoint+"/kernels", &kernels)
+}
+
+func (c *Client) DeleteKernel(id string) error {
+	return c.deleteReq(fmt.Sprintf("%s/kernels/%s", c.endpoint, id))
+}
+
+type K3sKernelDiscoveryEntry struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Arch        string `json:"arch"`
+	DownloadURL string `json:"download_url"`
+	SizeBytes   int64  `json:"size_bytes"`
+	Imported    bool   `json:"imported,omitempty"`
+}
+
+func (c *Client) DiscoverK3sKernels() ([]K3sKernelDiscoveryEntry, error) {
+	var entries []K3sKernelDiscoveryEntry
+	if err := c.getJSON(c.endpoint+"/kernels/discover/k3s", &entries); err != nil {
+		return nil, fmt.Errorf("discover k3s kernels: %w", err)
+	}
+	return entries, nil
+}
+
+func (c *Client) ImportK3sKernel(entry K3sKernelDiscoveryEntry) (*Kernel, error) {
+	var kernel Kernel
+	if err := c.postJSON(c.endpoint+"/kernels/discover/k3s/import", entry, &kernel); err != nil {
+		return nil, fmt.Errorf("import k3s kernel: %w", err)
+	}
+	return &kernel, nil
+}
+
+// ── Kernel catalog (discoverable, not yet imported) ──────────────────────────
+
+// KernelCatalogEntry is a built-in or discovered Firecracker kernel that can
+// be imported into the kernels table via ImportKernelCatalogEntry.
+type KernelCatalogEntry struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Distro        string `json:"distro"`
+	Version       string `json:"version"`
+	Arch          string `json:"arch"`
+	VmlinuzURL    string `json:"vmlinuz_url"`
+	VmlinuzSizeMB int    `json:"vmlinuz_size_mb"`
+	Description   string `json:"description,omitempty"`
+	Imported      bool   `json:"imported"`
+}
+
+func (c *Client) ListKernelCatalog() ([]KernelCatalogEntry, error) {
+	var entries []KernelCatalogEntry
+	return entries, c.getJSON(c.endpoint+"/kernel-catalog", &entries)
+}
+
+type kernelCatalogStatus struct {
+	EntryID  string `json:"entry_id"`
+	Status   string `json:"status"`
+	Progress int    `json:"progress"`
+	Error    string `json:"error,omitempty"`
+	Imported bool   `json:"imported"`
+}
+
+// ImportKernelCatalogEntry kicks off an async download of the given catalog
+// entry into the kernels table (same id). Use KernelCatalogStatus to poll.
+func (c *Client) ImportKernelCatalogEntry(id string) error {
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/kernel-catalog/%s/import", c.endpoint, id), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return c.apiError(resp)
+	}
+	return nil
+}
+
+func (c *Client) KernelCatalogStatus(id string) (*kernelCatalogStatus, error) {
+	var status kernelCatalogStatus
+	if err := c.getJSON(fmt.Sprintf("%s/kernel-catalog/%s/status", c.endpoint, id), &status); err != nil {
+		return nil, err
+	}
+	return &status, nil
 }
 
 // ── Helper methods ────────────────────────────────────────────────────────────
@@ -137,7 +222,7 @@ func (c *Client) postJSON(url string, body, out any) error {
 		return fmt.Errorf("POST %s: %w", url, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
 		return c.apiError(resp)
 	}
 	if out != nil {
@@ -257,7 +342,9 @@ type LoadBalancer struct {
 
 type LBBackend struct {
 	ID      string `json:"id,omitempty"`
-	Address string `json:"address"`
+	Address string `json:"address,omitempty"`
+	VMID    string `json:"vm_id,omitempty"`
+	Port    int    `json:"port,omitempty"`
 	Weight  int    `json:"weight,omitempty"`
 }
 
@@ -685,51 +772,54 @@ func (c *Client) ResizeStorageVolume(id string, newSizeBytes int64) (*StorageVol
 // ── Kube cluster ──────────────────────────────────────────────────────────────
 
 type KubeCluster struct {
-	ID           string     `json:"id"`
-	Name         string     `json:"name"`
-	Status       string     `json:"status"`
-	TalosVersion string     `json:"talos_version"`
-	K8sVersion   string     `json:"k8s_version"`
-	CNI          string     `json:"cni"`
-	LBMode       string     `json:"lb_mode"`
-	VPCID        string     `json:"vpc_id,omitempty"`
-	VPCCIDR      string     `json:"vpc_cidr,omitempty"`
-	PublicIPID   string     `json:"public_ip_id,omitempty"`
-	PublicIP     string     `json:"public_ip,omitempty"`
-	Endpoint     string     `json:"endpoint,omitempty"`
-	CPCount      int        `json:"cp_count"`
-	WorkerCount  int        `json:"worker_count"`
-	TalosImage   string     `json:"talos_image"`
-	CPVCPUs      int        `json:"cp_vcpus"`
-	CPMemoryMB   int        `json:"cp_memory_mb"`
-	CPDiskGB     int        `json:"cp_disk_gb"`
-	WorkerVCPUs  int        `json:"worker_vcpus"`
-	WorkerMemMB  int        `json:"worker_memory_mb"`
-	WorkerDiskGB int        `json:"worker_disk_gb"`
-	ErrorMsg     string     `json:"error,omitempty"`
-	Nodes        []KubeNode `json:"nodes,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID            string     `json:"id"`
+	Name          string     `json:"name"`
+	Status        string     `json:"status"`
+	K8sVersion    string     `json:"k8s_version"`
+	CNI           string     `json:"cni"`
+	LBMode        string     `json:"lb_mode"`
+	VPCID         string     `json:"vpc_id,omitempty"`
+	VPCCIDR       string     `json:"vpc_cidr,omitempty"`
+	PublicIPID    string     `json:"public_ip_id,omitempty"`
+	PublicIP      string     `json:"public_ip,omitempty"`
+	Endpoint      string     `json:"endpoint,omitempty"`
+	CPCount       int        `json:"cp_count"`
+	WorkerCount   int        `json:"worker_count"`
+	Runtime       string     `json:"runtime"`
+	KernelID      string     `json:"kernel_id,omitempty"`
+	KernelVersion string     `json:"kernel_version,omitempty"`
+	RootfsID      string     `json:"rootfs_id,omitempty"`
+	Storage       string     `json:"storage,omitempty"`
+	CPVCPUs       int        `json:"cp_vcpus"`
+	CPMemoryMB    int        `json:"cp_memory_mb"`
+	CPDiskGB      int        `json:"cp_disk_gb"`
+	WorkerVCPUs   int        `json:"worker_vcpus"`
+	WorkerMemMB   int        `json:"worker_memory_mb"`
+	WorkerDiskGB  int        `json:"worker_disk_gb"`
+	ErrorMsg      string     `json:"error,omitempty"`
+	Nodes         []KubeNode `json:"nodes,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 type KubeNode struct {
-	ID        string `json:"id"`
-	ClusterID string `json:"cluster_id"`
-	VMID      string `json:"vm_id"`
-	Role      string `json:"role"`
-	IP        string `json:"ip,omitempty"`
-	Status    string `json:"status"`
-}
-
-type TalosRelease struct {
-	Version     string    `json:"version"`
-	K8sVersion  string    `json:"k8s_version,omitempty"`
-	PublishedAt time.Time `json:"published_at"`
+	ID             string `json:"id"`
+	ClusterID      string `json:"cluster_id"`
+	VMID           string `json:"vm_id"`
+	Name           string `json:"name,omitempty"`
+	Role           string `json:"role"`
+	IP             string `json:"ip,omitempty"`
+	Status         string `json:"status"`
+	KubeletVersion string `json:"kubelet_version,omitempty"`
+	UpgradeError   string `json:"upgrade_error,omitempty"`
 }
 
 type KubeCreateRequest struct {
 	Name         string `json:"name"`
-	TalosImage   string `json:"talos_image"`
+	Runtime      string `json:"runtime,omitempty"`
+	KernelID     string `json:"kernel_id,omitempty"`
+	RootfsID     string `json:"rootfs_id,omitempty"`
+	Storage      string `json:"storage,omitempty"`
 	CPCount      int    `json:"cp_count"`
 	WorkerCount  int    `json:"worker_count"`
 	CPVCPUs      int    `json:"cp_vcpus"`
@@ -741,14 +831,14 @@ type KubeCreateRequest struct {
 	CNI          string `json:"cni"`
 	LBMode       string `json:"lb_mode"`
 	PoolID       string `json:"pool_id,omitempty"`
-	TalosVersion string `json:"talos_version"`
 	K8sVersion   string `json:"k8s_version"`
 }
 
 type KubePatchRequest struct {
-	WorkerCount  *int   `json:"worker_count,omitempty"`
-	TalosVersion string `json:"talos_version,omitempty"`
-	K8sVersion   string `json:"k8s_version,omitempty"`
+	CPCount     *int   `json:"cp_count,omitempty"`
+	WorkerCount *int   `json:"worker_count,omitempty"`
+	K8sVersion  string `json:"k8s_version,omitempty"`
+	RootfsID    string `json:"rootfs_id,omitempty"`
 }
 
 func (c *Client) ListKubeClusters() ([]KubeCluster, error) {
@@ -790,14 +880,6 @@ func (c *Client) DeleteKubeCluster(id string) error {
 	return nil
 }
 
-func (c *Client) ListTalosReleases() ([]TalosRelease, error) {
-	var releases []TalosRelease
-	if err := c.getJSON(fmt.Sprintf("%s/kube/releases", c.endpoint), &releases); err != nil {
-		return nil, fmt.Errorf("list talos releases: %w", err)
-	}
-	return releases, nil
-}
-
 func (c *Client) GetKubeconfig(id string) (string, error) {
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/kube/clusters/%s/kubeconfig", c.endpoint, id), nil)
 	if err != nil {
@@ -818,24 +900,57 @@ func (c *Client) GetKubeconfig(id string) (string, error) {
 	return buf.String(), nil
 }
 
-func (c *Client) GetTalosconfig(id string) (string, error) {
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/kube/clusters/%s/talosconfig", c.endpoint, id), nil)
-	if err != nil {
-		return "", fmt.Errorf("building GET talosconfig request for cluster %s: %w", id, err)
+// ── Rootfs images (Firecracker) ──────────────────────────────────────────────
+
+// RootfsImage is an uploaded or imported Firecracker rootfs, as returned by
+// GET /rootfs-images. Source/Version are only set for images imported via
+// the k3s auto-fetch flow (DiscoverK3sRootfs/ImportK3sRootfs); manual
+// uploads leave them empty.
+type RootfsImage struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	Arch        string    `json:"arch"`
+	RootfsPath  string    `json:"rootfs_path"`
+	SizeBytes   int64     `json:"size_bytes"`
+	SHA256      string    `json:"sha256,omitempty"`
+	Source      string    `json:"source,omitempty"`
+	Version     string    `json:"version,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func (c *Client) ListRootfsImages() ([]RootfsImage, error) {
+	var images []RootfsImage
+	return images, c.getJSON(c.endpoint+"/rootfs-images", &images)
+}
+
+func (c *Client) DeleteRootfsImage(id string) error {
+	return c.deleteReq(fmt.Sprintf("%s/rootfs-images/%s", c.endpoint, id))
+}
+
+// K3sRootfsDiscoveryEntry is a transient (not-yet-imported) k3s rootfs build
+// found in latticeve-k3s-images' latest GitHub release.
+type K3sRootfsDiscoveryEntry struct {
+	Version     string `json:"version"`
+	Arch        string `json:"arch"`
+	DownloadURL string `json:"download_url"`
+	SizeBytes   int64  `json:"size_bytes"`
+}
+
+func (c *Client) DiscoverK3sRootfs() ([]K3sRootfsDiscoveryEntry, error) {
+	var entries []K3sRootfsDiscoveryEntry
+	if err := c.getJSON(fmt.Sprintf("%s/rootfs-images/discover/k3s", c.endpoint), &entries); err != nil {
+		return nil, fmt.Errorf("discover k3s rootfs: %w", err)
 	}
-	resp, err := c.do(req)
-	if err != nil {
-		return "", fmt.Errorf("get talosconfig for cluster %s: %w", id, err)
+	return entries, nil
+}
+
+func (c *Client) ImportK3sRootfs(entry K3sRootfsDiscoveryEntry) (*RootfsImage, error) {
+	var img RootfsImage
+	if err := c.postJSON(fmt.Sprintf("%s/rootfs-images/discover/k3s/import", c.endpoint), entry, &img); err != nil {
+		return nil, fmt.Errorf("import k3s rootfs: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", c.apiError(resp)
-	}
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(resp.Body); err != nil {
-		return "", fmt.Errorf("reading talosconfig for cluster %s: %w", id, err)
-	}
-	return buf.String(), nil
+	return &img, nil
 }
 
 // ── Security group ────────────────────────────────────────────────────────────
@@ -911,6 +1026,29 @@ func (c *Client) RemoveSGRule(sgID, ruleID string) error {
 	return nil
 }
 
+func (c *Client) UpdateSGRule(sgID, ruleID string, rule SGRule) error {
+	if err := c.putJSON(fmt.Sprintf("%s/security-groups/%s/rules/%s", c.endpoint, sgID, ruleID), rule); err != nil {
+		return fmt.Errorf("update rule %s in security group %s: %w", ruleID, sgID, err)
+	}
+	return nil
+}
+
+func (c *Client) ListVMSecurityGroups(vmID string) ([]SecurityGroup, error) {
+	var groups []SecurityGroup
+	if err := c.getJSON(fmt.Sprintf("%s/vm/%s/security-groups", c.endpoint, vmID), &groups); err != nil {
+		return nil, fmt.Errorf("list security groups for VM %s: %w", vmID, err)
+	}
+	return groups, nil
+}
+
+func (c *Client) AssignVMSecurityGroup(vmID, sgID string) error {
+	return c.postJSON(fmt.Sprintf("%s/vm/%s/security-groups", c.endpoint, vmID), map[string]string{"sg_id": sgID}, nil)
+}
+
+func (c *Client) UnassignVMSecurityGroup(vmID, sgID string) error {
+	return c.deleteReq(fmt.Sprintf("%s/vm/%s/security-groups/%s", c.endpoint, vmID, sgID))
+}
+
 // ── IPAM pool ─────────────────────────────────────────────────────────────────
 
 type IPAMPool struct {
@@ -954,9 +1092,86 @@ func (c *Client) CreateIPAMPool(pool IPAMPool) (*IPAMPool, error) {
 	return &result, nil
 }
 
+func (c *Client) UpdateIPAMPool(id string, pool IPAMPool) error {
+	return c.putJSON(fmt.Sprintf("%s/ipam/pools/%s", c.endpoint, id), pool)
+}
+
 func (c *Client) DeleteIPAMPool(id string) error {
 	if err := c.deleteReq(fmt.Sprintf("%s/ipam/pools/%s", c.endpoint, id)); err != nil {
 		return fmt.Errorf("delete ipam pool %s: %w", id, err)
 	}
 	return nil
+}
+
+type IPAMLease struct {
+	ID        string `json:"id"`
+	PoolID    string `json:"pool_id"`
+	MAC       string `json:"mac"`
+	IP        string `json:"ip"`
+	Hostname  string `json:"hostname,omitempty"`
+	VMID      string `json:"vm_id,omitempty"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (c *Client) ListIPAMLeases(poolID string) ([]IPAMLease, error) {
+	var leases []IPAMLease
+	if err := c.getJSON(fmt.Sprintf("%s/ipam/pools/%s/leases", c.endpoint, poolID), &leases); err != nil {
+		return nil, fmt.Errorf("list IPAM leases for pool %s: %w", poolID, err)
+	}
+	return leases, nil
+}
+
+func (c *Client) CreateIPAMLease(poolID string, lease IPAMLease) (*IPAMLease, error) {
+	var created IPAMLease
+	if err := c.postJSON(fmt.Sprintf("%s/ipam/pools/%s/leases", c.endpoint, poolID), lease, &created); err != nil {
+		return nil, fmt.Errorf("create IPAM lease: %w", err)
+	}
+	return &created, nil
+}
+
+func (c *Client) DeleteIPAMLease(id string) error {
+	return c.deleteReq(fmt.Sprintf("%s/ipam/leases/%s", c.endpoint, id))
+}
+
+type AffinityGroup struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Policy    string `json:"policy"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (c *Client) ListAffinityGroups() ([]AffinityGroup, error) {
+	var groups []AffinityGroup
+	if err := c.getJSON(c.endpoint+"/affinity-groups", &groups); err != nil {
+		return nil, fmt.Errorf("list affinity groups: %w", err)
+	}
+	return groups, nil
+}
+
+func (c *Client) CreateAffinityGroup(name, policy string) (*AffinityGroup, error) {
+	var group AffinityGroup
+	if err := c.postJSON(c.endpoint+"/affinity-groups", map[string]string{"name": name, "policy": policy}, &group); err != nil {
+		return nil, fmt.Errorf("create affinity group: %w", err)
+	}
+	return &group, nil
+}
+
+func (c *Client) DeleteAffinityGroup(id string) error {
+	return c.deleteReq(fmt.Sprintf("%s/affinity-groups/%s", c.endpoint, id))
+}
+
+func (c *Client) ListVMAffinityGroups(vmID string) ([]AffinityGroup, error) {
+	var groups []AffinityGroup
+	if err := c.getJSON(fmt.Sprintf("%s/vm/%s/affinity-groups", c.endpoint, vmID), &groups); err != nil {
+		return nil, fmt.Errorf("list affinity groups for VM %s: %w", vmID, err)
+	}
+	return groups, nil
+}
+
+func (c *Client) AssignVMAffinityGroup(vmID, groupID string) error {
+	return c.postJSON(fmt.Sprintf("%s/vm/%s/affinity-groups", c.endpoint, vmID), map[string]string{"group_id": groupID}, nil)
+}
+
+func (c *Client) UnassignVMAffinityGroup(vmID, groupID string) error {
+	return c.deleteReq(fmt.Sprintf("%s/vm/%s/affinity-groups/%s", c.endpoint, vmID, groupID))
 }
