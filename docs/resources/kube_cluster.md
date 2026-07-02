@@ -46,11 +46,10 @@ resource "lattice_kube_cluster" "prod" {
   worker_disk_gb   = 100
 }
 
-output "kubeconfig" {
-  value     = lattice_kube_cluster.prod.kubeconfig
-  sensitive = true
-}
 ```
+
+The provider API key cannot retrieve a human kubeconfig. Download a short-lived,
+role-scoped kubeconfig from the LatticeVE UI after apply.
 
 The pool CIDR must be reserved inside the selected external bridge's connected IPv4 subnet and excluded from upstream DHCP. The cluster allocates and manages its own API endpoint address from `pool_id`; do not create a separate `lattice_public_ip` for it.
 
@@ -98,13 +97,16 @@ LatticeVE validates the upgrade path, snapshots etcd, upgrades HA control planes
 
 - `name` (Required, Forces new resource) — Cluster name.
 - `runtime` (Optional, Computed, Forces new resource) — VM backend for cluster nodes. Only `firecracker` is supported.
-- `kernel_id` (Optional, Computed, Forces new resource) — Kubernetes-compatible Firecracker kernel UUID, normally from `lattice_k3s_kernel`.
+- `kernel_id` (Required, Forces new resource) — Kubernetes-compatible Firecracker kernel UUID, normally from `lattice_k3s_kernel`.
 - `rootfs_id` (Optional, Computed) — Rootfs image UUID from `lattice_rootfs_image` or `lattice_k3s_rootfs_image`. Changing it invokes the safe in-place upgrade/revision workflow.
 - `storage` (Optional, Computed, Forces new resource) — Named storage backend for cluster VM disks. Empty uses the default backend.
 - `k8s_version` (Optional, Computed) — Kubernetes version, e.g. `v1.32.0`. Inferred from the rootfs image's name/description when omitted.
 - `cni` (Optional, Computed, Forces new resource) — CNI plugin: `flannel`, `cilium`, or `none`.
 - `lb_mode` (Optional, Computed, Forces new resource) — Load-balancer mode: `ccm`, `metallb`, or `cilium`.
 - `pool_id` (Optional, Forces new resource) — Public IP pool ID for the control-plane floating IP.
+- `vpc_id` (Optional, Computed, Forces new resource) — Existing VPC UUID; when omitted LatticeVE creates a managed VPC.
+- `root_password_hash` (Optional, Sensitive, Forces new resource) — crypt(3) root password hash for cluster nodes.
+- `ssh_authorized_keys` (Optional, Forces new resource) — public SSH keys installed on cluster nodes.
 - `cp_count` (Optional, Computed) — Control-plane node count. Must be 1, 3, or 5. Scale-out is in place; scale-down is rejected.
 - `worker_count` (Optional, Computed) — Worker node count. **Updatable** — increase to scale out, decrease to scale in.
 - `cp_vcpus` (Optional, Computed, Forces new resource) — vCPUs per control-plane node.
@@ -121,7 +123,9 @@ LatticeVE validates the upgrade path, snapshots etcd, upgrades HA control planes
 - `status` — Cluster lifecycle: `provisioning`, `ready`, `failed`, `deleting`.
 - `endpoint` — Kubernetes API server URL.
 - `public_ip` — Allocated public IP for the control plane.
-- `vpc_id` — VPC UUID created for this cluster.
+- `vpc_id` — Cluster VPC UUID.
 - `vpc_cidr` — CIDR assigned to the cluster VPC.
-- `kubeconfig` (Sensitive) — kubeconfig YAML for `kubectl` access.
+- `vpc_managed` — Whether LatticeVE owns and deletes the cluster VPC.
+- `oidc_enabled` — Whether role-scoped Kubernetes credentials are enabled.
+- `kubeconfig` (Deprecated, always null) — human credentials are intentionally excluded from Terraform state.
 - `nodes` — Cluster nodes with `id`, `vm_id`, `name`, `role`, `ip`, `status`, live `kubelet_version`, and any node-specific `upgrade_error`.

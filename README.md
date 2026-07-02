@@ -66,7 +66,7 @@ provider "lattice" {
 | `lattice_kernel_catalog` | Browse kernels available to import (built-in entries plus Firecracker CI discovery) |
 | `lattice_rootfs_image` | Look up a Firecracker rootfs image by name, arch, source, or version |
 | `lattice_nodes` | List host nodes filtered by `arch` (`amd64`/`arm64`); returns capacity metrics |
-| `lattice_kube_cluster` | Look up a cluster and retrieve endpoint, kubeconfig, image, and live node status |
+| `lattice_kube_cluster` | Look up a cluster and retrieve endpoint, image, OIDC capability, and live node status |
 | `lattice_public_ip_pools` | List all public IP pools |
 | `lattice_storage_backends` | List all storage backends |
 
@@ -216,13 +216,12 @@ resource "lattice_kube_cluster" "prod" {
   worker_disk_gb   = 100
 }
 
-output "kubeconfig" {
-  value     = lattice_kube_cluster.prod.kubeconfig
-  sensitive = true
-}
 ```
 
-Omit `kernel_id`/`rootfs_id` to use the controller's built-in k3s kernel and image instead. Scale workers with a plan/apply — no replacement needed:
+`kernel_id` and `rootfs_id` must reference compatible Kubernetes artifacts.
+API keys cannot download human Kubernetes credentials; after apply, download a
+15-minute role-scoped kubeconfig from the LatticeVE UI. Scale workers with a
+plan/apply — no replacement needed:
 
 ```hcl
 resource "lattice_kube_cluster" "prod" {

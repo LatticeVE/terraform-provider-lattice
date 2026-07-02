@@ -1,6 +1,6 @@
 # lattice_kube_cluster
 
-Looks up an existing LatticeKube cluster by `id` or `name` and exposes its endpoint, sensitive kubeconfig, image versions, node counts, and live per-node kubelet/upgrade status.
+Looks up an existing LatticeKube cluster by `id` or `name` and exposes its endpoint, image versions, VPC/OIDC ownership state, node counts, and live per-node kubelet/upgrade status. Human kubeconfigs are short-lived and intentionally unavailable to provider API keys.
 
 ```hcl
 data "lattice_kube_cluster" "prod" {

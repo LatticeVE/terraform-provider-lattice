@@ -26,3 +26,5 @@ resource "lattice_storage_volume" "data" {
   - `name` — Backend name.
   - `type` — Backend type (`lvm`, `linstor`, etc.).
   - `is_default` — Whether this is the default backend.
+  - `allocation_policy` — `thin` or `preallocated`.
+  - `disk_overcommit_ratio` — Configured logical-to-physical capacity ratio.

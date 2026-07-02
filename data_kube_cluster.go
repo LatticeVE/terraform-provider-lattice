@@ -23,6 +23,8 @@ type KubeClusterDataSourceModel struct {
 	PublicIP      types.String    `tfsdk:"public_ip"`
 	VPCID         types.String    `tfsdk:"vpc_id"`
 	VPCCIDR       types.String    `tfsdk:"vpc_cidr"`
+	VPCManaged    types.Bool      `tfsdk:"vpc_managed"`
+	OIDCEnabled   types.Bool      `tfsdk:"oidc_enabled"`
 	CPCount       types.Int64     `tfsdk:"cp_count"`
 	WorkerCount   types.Int64     `tfsdk:"worker_count"`
 	Kubeconfig    types.String    `tfsdk:"kubeconfig"`
@@ -44,8 +46,9 @@ func (d *KubeClusterDataSource) Schema(_ context.Context, _ datasource.SchemaReq
 		"status": schema.StringAttribute{Computed: true}, "k8s_version": schema.StringAttribute{Computed: true},
 		"kernel_id": schema.StringAttribute{Computed: true}, "kernel_version": schema.StringAttribute{Computed: true}, "rootfs_id": schema.StringAttribute{Computed: true},
 		"endpoint": schema.StringAttribute{Computed: true}, "public_ip": schema.StringAttribute{Computed: true}, "vpc_id": schema.StringAttribute{Computed: true}, "vpc_cidr": schema.StringAttribute{Computed: true},
+		"vpc_managed": schema.BoolAttribute{Computed: true}, "oidc_enabled": schema.BoolAttribute{Computed: true},
 		"cp_count": schema.Int64Attribute{Computed: true}, "worker_count": schema.Int64Attribute{Computed: true},
-		"kubeconfig": schema.StringAttribute{Computed: true, Sensitive: true},
+		"kubeconfig": schema.StringAttribute{Computed: true, Sensitive: true, MarkdownDescription: "Deprecated: API keys cannot request human Kubernetes credentials; use the LatticeVE UI."},
 		"nodes":      schema.ListNestedAttribute{Computed: true, NestedObject: schema.NestedAttributeObject{Attributes: nodeAttrs}},
 	}}
 }
@@ -91,11 +94,6 @@ func (d *KubeClusterDataSource) Read(ctx context.Context, req datasource.ReadReq
 		resp.Diagnostics.AddError("Error Reading Kubernetes Cluster", err.Error())
 		return
 	}
-	kubeconfig, err := d.client.GetKubeconfig(cluster.ID)
-	if err != nil {
-		resp.Diagnostics.AddError("Error Fetching Kubeconfig", err.Error())
-		return
-	}
 	state.ID = types.StringValue(cluster.ID)
 	state.Name = types.StringValue(cluster.Name)
 	state.Status = types.StringValue(cluster.Status)
@@ -107,9 +105,11 @@ func (d *KubeClusterDataSource) Read(ctx context.Context, req datasource.ReadReq
 	state.PublicIP = types.StringValue(cluster.PublicIP)
 	state.VPCID = types.StringValue(cluster.VPCID)
 	state.VPCCIDR = types.StringValue(cluster.VPCCIDR)
+	state.VPCManaged = types.BoolValue(cluster.VPCManaged)
+	state.OIDCEnabled = types.BoolValue(cluster.OIDCEnabled)
 	state.CPCount = types.Int64Value(int64(cluster.CPCount))
 	state.WorkerCount = types.Int64Value(int64(cluster.WorkerCount))
-	state.Kubeconfig = types.StringValue(kubeconfig)
+	state.Kubeconfig = types.StringNull()
 	state.Nodes = make([]KubeNodeModel, len(cluster.Nodes))
 	for i, n := range cluster.Nodes {
 		state.Nodes[i] = KubeNodeModel{ID: types.StringValue(n.ID), VMID: types.StringValue(n.VMID), Name: types.StringValue(n.Name), Role: types.StringValue(n.Role), IP: types.StringValue(n.IP), Status: types.StringValue(n.Status), KubeletVersion: types.StringValue(n.KubeletVersion), UpgradeError: types.StringValue(n.UpgradeError)}

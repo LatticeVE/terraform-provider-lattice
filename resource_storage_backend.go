@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/float64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -22,12 +23,14 @@ type StorageBackendResource struct {
 }
 
 type StorageBackendModel struct {
-	ID        types.String `tfsdk:"id"`
-	Name      types.String `tfsdk:"name"`
-	Type      types.String `tfsdk:"type"`
-	Config    types.Map    `tfsdk:"config"`
-	IsDefault types.Bool   `tfsdk:"is_default"`
-	CreatedAt types.String `tfsdk:"created_at"`
+	ID                  types.String  `tfsdk:"id"`
+	Name                types.String  `tfsdk:"name"`
+	Type                types.String  `tfsdk:"type"`
+	Config              types.Map     `tfsdk:"config"`
+	AllocationPolicy    types.String  `tfsdk:"allocation_policy"`
+	DiskOvercommitRatio types.Float64 `tfsdk:"disk_overcommit_ratio"`
+	IsDefault           types.Bool    `tfsdk:"is_default"`
+	CreatedAt           types.String  `tfsdk:"created_at"`
 }
 
 func NewStorageBackendResource() resource.Resource {
@@ -66,6 +69,22 @@ func (r *StorageBackendResource) Schema(_ context.Context, _ resource.SchemaRequ
 				Optional:    true,
 				PlanModifiers: []planmodifier.Map{
 					mapplanmodifier.RequiresReplace(),
+				},
+			},
+			"allocation_policy": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "Disk allocation policy: `thin` (default) or `preallocated`. Changing it replaces the backend.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"disk_overcommit_ratio": schema.Float64Attribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "Logical-to-physical disk capacity ratio: 1.0, 1.5, or 2.0. Preallocated storage requires 1.0. Changing it replaces the backend.",
+				PlanModifiers: []planmodifier.Float64{
+					float64planmodifier.RequiresReplace(),
 				},
 			},
 			"is_default": schema.BoolAttribute{
@@ -114,6 +133,28 @@ func (r *StorageBackendResource) Create(ctx context.Context, req resource.Create
 			cfgAny[k] = v
 		}
 	}
+	policy := "thin"
+	if !data.AllocationPolicy.IsNull() && !data.AllocationPolicy.IsUnknown() {
+		policy = data.AllocationPolicy.ValueString()
+	}
+	ratio := 1.0
+	if !data.DiskOvercommitRatio.IsNull() && !data.DiskOvercommitRatio.IsUnknown() {
+		ratio = data.DiskOvercommitRatio.ValueFloat64()
+	}
+	if policy != "thin" && policy != "preallocated" {
+		resp.Diagnostics.AddError("Invalid Allocation Policy", "allocation_policy must be thin or preallocated")
+		return
+	}
+	if ratio != 1 && ratio != 1.5 && ratio != 2 {
+		resp.Diagnostics.AddError("Invalid Disk Overcommit Ratio", "disk_overcommit_ratio must be 1.0, 1.5, or 2.0")
+		return
+	}
+	if policy == "preallocated" && ratio != 1 {
+		resp.Diagnostics.AddError("Unsafe Disk Overcommit", "preallocated storage requires disk_overcommit_ratio = 1.0")
+		return
+	}
+	cfgAny["allocation_policy"] = policy
+	cfgAny["disk_overcommit_ratio"] = ratio
 
 	backend, err := r.client.CreateStorageBackend(data.Name.ValueString(), data.Type.ValueString(), cfgAny)
 	if err != nil {
@@ -175,9 +216,27 @@ func storageBackendToModel(ctx context.Context, backend *StorageBackend, data *S
 	data.Type = types.StringValue(backend.Type)
 	data.IsDefault = types.BoolValue(backend.IsDefault)
 	data.CreatedAt = types.StringValue(backend.CreatedAt.Format("2006-01-02T15:04:05Z"))
+	policy := "thin"
+	if value, ok := backend.Config["allocation_policy"].(string); ok && value != "" {
+		policy = value
+	}
+	ratio := 1.0
+	switch value := backend.Config["disk_overcommit_ratio"].(type) {
+	case float64:
+		ratio = value
+	case float32:
+		ratio = float64(value)
+	case int:
+		ratio = float64(value)
+	}
+	data.AllocationPolicy = types.StringValue(policy)
+	data.DiskOvercommitRatio = types.Float64Value(ratio)
 
 	cfgStr := make(map[string]string, len(backend.Config))
 	for k, v := range backend.Config {
+		if k == "allocation_policy" || k == "disk_overcommit_ratio" {
+			continue
+		}
 		if sv, ok := v.(string); ok {
 			cfgStr[k] = sv
 		} else {

@@ -339,6 +339,17 @@ func TestClient_StorageBackendCRUD(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/storage/backends":
 			_ = json.NewEncoder(w).Encode([]StorageBackend{backend})
 		case r.Method == http.MethodPost && r.URL.Path == "/storage/backends":
+			var request map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode storage backend request: %v", err)
+			}
+			if request["id"] == "" || request["id"] == nil {
+				t.Error("storage backend request is missing generated id")
+			}
+			config, _ := request["config"].(map[string]any)
+			if config["allocation_policy"] != "thin" || config["disk_overcommit_ratio"] != 1.5 {
+				t.Errorf("storage allocation config = %#v", config)
+			}
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(backend)
 		case r.Method == http.MethodDelete && r.URL.Path == "/storage/backends/sb-1":
@@ -356,7 +367,11 @@ func TestClient_StorageBackendCRUD(t *testing.T) {
 	if err != nil || got.ID != "sb-1" {
 		t.Fatalf("GetStorageBackend: err=%v got=%+v", err, got)
 	}
-	created, err := client.CreateStorageBackend("linstor-default", "linstor", map[string]any{"controller": "linstor://10.0.0.1:3370"})
+	created, err := client.CreateStorageBackend("linstor-default", "linstor", map[string]any{
+		"controller":            "linstor://10.0.0.1:3370",
+		"allocation_policy":     "thin",
+		"disk_overcommit_ratio": 1.5,
+	})
 	if err != nil || created.ID != "sb-1" {
 		t.Fatalf("CreateStorageBackend: err=%v created=%+v", err, created)
 	}
@@ -436,6 +451,7 @@ func TestClient_StorageVolume_NotFound(t *testing.T) {
 
 func TestClient_KubeClusterCRUD(t *testing.T) {
 	cluster := KubeCluster{ID: "kube-1", Name: "prod", Status: "ready", Runtime: "firecracker"}
+	var createBody KubeCreateRequest
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -445,6 +461,9 @@ func TestClient_KubeClusterCRUD(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/kube/clusters/kube-1":
 			_ = json.NewEncoder(w).Encode(cluster)
 		case r.Method == http.MethodPost && r.URL.Path == "/kube/clusters":
+			if err := json.NewDecoder(r.Body).Decode(&createBody); err != nil {
+				t.Errorf("decode create request: %v", err)
+			}
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(cluster)
 		case r.Method == http.MethodPatch && r.URL.Path == "/kube/clusters/kube-1":
@@ -468,9 +487,12 @@ func TestClient_KubeClusterCRUD(t *testing.T) {
 	if err != nil || got.ID != "kube-1" {
 		t.Fatalf("GetKubeCluster: err=%v got=%+v", err, got)
 	}
-	created, err := client.CreateKubeCluster(KubeCreateRequest{Name: "prod"})
+	created, err := client.CreateKubeCluster(KubeCreateRequest{Name: "prod", VPCID: "vpc-existing", RootPasswordHash: "$6$hash", SSHAuthorizedKeys: []string{"ssh-ed25519 AAAA test"}})
 	if err != nil || created.ID != "kube-1" {
 		t.Fatalf("CreateKubeCluster: err=%v created=%+v", err, created)
+	}
+	if createBody.VPCID != "vpc-existing" || createBody.RootPasswordHash != "$6$hash" || len(createBody.SSHAuthorizedKeys) != 1 {
+		t.Fatalf("create request lost VPC/node access fields: %+v", createBody)
 	}
 	wc := 5
 	patched, err := client.PatchKubeCluster("kube-1", KubePatchRequest{WorkerCount: &wc})

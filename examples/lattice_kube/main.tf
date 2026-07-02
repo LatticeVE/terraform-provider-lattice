@@ -95,11 +95,8 @@ output "kube_endpoint" {
   value       = lattice_kube_cluster.prod.endpoint
 }
 
-output "kubeconfig" {
-  description = "Kubeconfig for kubectl access"
-  value       = lattice_kube_cluster.prod.kubeconfig
-  sensitive   = true
-}
+# Human kubeconfigs are short-lived and role-scoped. Download one from the
+# LatticeVE UI after apply; API-key credentials are not written to state.
 
 output "cluster_images" {
   value = {

@@ -22,10 +22,12 @@ type StorageBackendsModel struct {
 }
 
 var storageBackendSummaryAttrTypes = map[string]attr.Type{
-	"id":         types.StringType,
-	"name":       types.StringType,
-	"type":       types.StringType,
-	"is_default": types.BoolType,
+	"id":                    types.StringType,
+	"name":                  types.StringType,
+	"type":                  types.StringType,
+	"is_default":            types.BoolType,
+	"allocation_policy":     types.StringType,
+	"disk_overcommit_ratio": types.Float64Type,
 }
 
 func NewStorageBackendsDataSource() datasource.DataSource {
@@ -56,6 +58,8 @@ func (d *StorageBackendsDataSource) Schema(_ context.Context, _ datasource.Schem
 						"is_default": schema.BoolAttribute{
 							Computed: true,
 						},
+						"allocation_policy":     schema.StringAttribute{Computed: true},
+						"disk_overcommit_ratio": schema.Float64Attribute{Computed: true},
 					},
 				},
 			},
@@ -90,11 +94,21 @@ func (d *StorageBackendsDataSource) Read(ctx context.Context, req datasource.Rea
 
 	backendVals := make([]attr.Value, 0, len(backends))
 	for _, backend := range backends {
+		policy := "thin"
+		if value, ok := backend.Config["allocation_policy"].(string); ok && value != "" {
+			policy = value
+		}
+		ratio := 1.0
+		if value, ok := backend.Config["disk_overcommit_ratio"].(float64); ok && value != 0 {
+			ratio = value
+		}
 		obj, diags := types.ObjectValue(storageBackendSummaryAttrTypes, map[string]attr.Value{
-			"id":         types.StringValue(backend.ID),
-			"name":       types.StringValue(backend.Name),
-			"type":       types.StringValue(backend.Type),
-			"is_default": types.BoolValue(backend.IsDefault),
+			"id":                    types.StringValue(backend.ID),
+			"name":                  types.StringValue(backend.Name),
+			"type":                  types.StringValue(backend.Type),
+			"is_default":            types.BoolValue(backend.IsDefault),
+			"allocation_policy":     types.StringValue(policy),
+			"disk_overcommit_ratio": types.Float64Value(ratio),
 		})
 		resp.Diagnostics.Append(diags...)
 		if resp.Diagnostics.HasError() {

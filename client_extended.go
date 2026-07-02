@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/hashicorp/go-uuid"
 )
 
 func isNotFound(err error) bool {
@@ -692,7 +694,11 @@ func (c *Client) GetStorageBackend(id string) (*StorageBackend, error) {
 }
 
 func (c *Client) CreateStorageBackend(name, backendType string, config map[string]any) (*StorageBackend, error) {
-	body := map[string]any{"name": name, "type": backendType, "config": config}
+	id, err := uuid.GenerateUUID()
+	if err != nil {
+		return nil, fmt.Errorf("generate storage backend id: %w", err)
+	}
+	body := map[string]any{"id": id, "name": name, "type": backendType, "config": config}
 	var backend StorageBackend
 	if err := c.postJSON(fmt.Sprintf("%s/storage/backends", c.endpoint), body, &backend); err != nil {
 		return nil, fmt.Errorf("create storage backend: %w", err)
@@ -780,6 +786,8 @@ type KubeCluster struct {
 	LBMode        string     `json:"lb_mode"`
 	VPCID         string     `json:"vpc_id,omitempty"`
 	VPCCIDR       string     `json:"vpc_cidr,omitempty"`
+	VPCManaged    bool       `json:"vpc_managed"`
+	OIDCEnabled   bool       `json:"oidc_enabled"`
 	PublicIPID    string     `json:"public_ip_id,omitempty"`
 	PublicIP      string     `json:"public_ip,omitempty"`
 	Endpoint      string     `json:"endpoint,omitempty"`
@@ -815,23 +823,26 @@ type KubeNode struct {
 }
 
 type KubeCreateRequest struct {
-	Name         string `json:"name"`
-	Runtime      string `json:"runtime,omitempty"`
-	KernelID     string `json:"kernel_id,omitempty"`
-	RootfsID     string `json:"rootfs_id,omitempty"`
-	Storage      string `json:"storage,omitempty"`
-	CPCount      int    `json:"cp_count"`
-	WorkerCount  int    `json:"worker_count"`
-	CPVCPUs      int    `json:"cp_vcpus"`
-	CPMemoryMB   int    `json:"cp_memory_mb"`
-	CPDiskGB     int    `json:"cp_disk_gb"`
-	WorkerVCPUs  int    `json:"worker_vcpus"`
-	WorkerMemMB  int    `json:"worker_memory_mb"`
-	WorkerDiskGB int    `json:"worker_disk_gb"`
-	CNI          string `json:"cni"`
-	LBMode       string `json:"lb_mode"`
-	PoolID       string `json:"pool_id,omitempty"`
-	K8sVersion   string `json:"k8s_version"`
+	Name              string   `json:"name"`
+	Runtime           string   `json:"runtime,omitempty"`
+	KernelID          string   `json:"kernel_id,omitempty"`
+	RootfsID          string   `json:"rootfs_id,omitempty"`
+	Storage           string   `json:"storage,omitempty"`
+	VPCID             string   `json:"vpc_id,omitempty"`
+	RootPasswordHash  string   `json:"root_password_hash,omitempty"`
+	SSHAuthorizedKeys []string `json:"ssh_authorized_keys,omitempty"`
+	CPCount           int      `json:"cp_count"`
+	WorkerCount       int      `json:"worker_count"`
+	CPVCPUs           int      `json:"cp_vcpus"`
+	CPMemoryMB        int      `json:"cp_memory_mb"`
+	CPDiskGB          int      `json:"cp_disk_gb"`
+	WorkerVCPUs       int      `json:"worker_vcpus"`
+	WorkerMemMB       int      `json:"worker_memory_mb"`
+	WorkerDiskGB      int      `json:"worker_disk_gb"`
+	CNI               string   `json:"cni"`
+	LBMode            string   `json:"lb_mode"`
+	PoolID            string   `json:"pool_id,omitempty"`
+	K8sVersion        string   `json:"k8s_version"`
 }
 
 type KubePatchRequest struct {
