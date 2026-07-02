@@ -487,11 +487,12 @@ func TestClient_KubeClusterCRUD(t *testing.T) {
 	if err != nil || got.ID != "kube-1" {
 		t.Fatalf("GetKubeCluster: err=%v got=%+v", err, got)
 	}
-	created, err := client.CreateKubeCluster(KubeCreateRequest{Name: "prod", VPCID: "vpc-existing", RootPasswordHash: "$6$hash", SSHAuthorizedKeys: []string{"ssh-ed25519 AAAA test"}})
+	metricsServer := false
+	created, err := client.CreateKubeCluster(KubeCreateRequest{Name: "prod", VPCID: "vpc-existing", RootPasswordHash: "$6$hash", SSHAuthorizedKeys: []string{"ssh-ed25519 AAAA test"}, MetricsServer: &metricsServer})
 	if err != nil || created.ID != "kube-1" {
 		t.Fatalf("CreateKubeCluster: err=%v created=%+v", err, created)
 	}
-	if createBody.VPCID != "vpc-existing" || createBody.RootPasswordHash != "$6$hash" || len(createBody.SSHAuthorizedKeys) != 1 {
+	if createBody.VPCID != "vpc-existing" || createBody.RootPasswordHash != "$6$hash" || len(createBody.SSHAuthorizedKeys) != 1 || createBody.MetricsServer == nil || *createBody.MetricsServer {
 		t.Fatalf("create request lost VPC/node access fields: %+v", createBody)
 	}
 	wc := 5

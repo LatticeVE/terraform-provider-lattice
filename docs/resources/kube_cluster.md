@@ -34,6 +34,7 @@ resource "lattice_kube_cluster" "prod" {
   pool_id   = lattice_public_ip_pool.kube.id
   cni       = "flannel"
   lb_mode   = "ccm"
+  metrics_server = true
 
   cp_count     = 3
   cp_vcpus     = 4
@@ -103,6 +104,7 @@ LatticeVE validates the upgrade path, snapshots etcd, upgrades HA control planes
 - `k8s_version` (Optional, Computed) — Kubernetes version, e.g. `v1.32.0`. Inferred from the rootfs image's name/description when omitted.
 - `cni` (Optional, Computed, Forces new resource) — CNI plugin: `flannel`, `cilium`, or `none`.
 - `lb_mode` (Optional, Computed, Forces new resource) — Load-balancer mode: `ccm`, `metallb`, or `cilium`.
+- `metrics_server` (Optional, Computed, Forces new resource) — Enables the bundled Kubernetes Metrics Server for live CPU/memory in LatticeVE workload views. Defaults to `true`; set `false` to bootstrap the cluster with `--disable=metrics-server`.
 - `pool_id` (Optional, Forces new resource) — Public IP pool ID for the control-plane floating IP.
 - `vpc_id` (Optional, Computed, Forces new resource) — Existing VPC UUID; when omitted LatticeVE creates a managed VPC.
 - `root_password_hash` (Optional, Sensitive, Forces new resource) — crypt(3) root password hash for cluster nodes.
@@ -127,5 +129,6 @@ LatticeVE validates the upgrade path, snapshots etcd, upgrades HA control planes
 - `vpc_cidr` — CIDR assigned to the cluster VPC.
 - `vpc_managed` — Whether LatticeVE owns and deletes the cluster VPC.
 - `oidc_enabled` — Whether role-scoped Kubernetes credentials are enabled.
+- `metrics_server` — Whether the cluster was bootstrapped with the bundled Metrics Server enabled.
 - `kubeconfig` (Deprecated, always null) — human credentials are intentionally excluded from Terraform state.
 - `nodes` — Cluster nodes with `id`, `vm_id`, `name`, `role`, `ip`, `status`, live `kubelet_version`, and any node-specific `upgrade_error`.

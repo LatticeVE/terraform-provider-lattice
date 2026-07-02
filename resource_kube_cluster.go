@@ -8,6 +8,8 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -49,6 +51,7 @@ type KubeClusterResourceModel struct {
 	VPCCIDR           types.String    `tfsdk:"vpc_cidr"`
 	VPCManaged        types.Bool      `tfsdk:"vpc_managed"`
 	OIDCEnabled       types.Bool      `tfsdk:"oidc_enabled"`
+	MetricsServer     types.Bool      `tfsdk:"metrics_server"`
 	RootPasswordHash  types.String    `tfsdk:"root_password_hash"`
 	SSHAuthorizedKeys types.List      `tfsdk:"ssh_authorized_keys"`
 	Kubeconfig        types.String    `tfsdk:"kubeconfig"`
@@ -261,6 +264,15 @@ func (r *KubeClusterResource) Schema(ctx context.Context, req resource.SchemaReq
 			},
 			"vpc_managed":  schema.BoolAttribute{MarkdownDescription: "Whether LatticeVE owns and deletes the cluster VPC.", Computed: true},
 			"oidc_enabled": schema.BoolAttribute{MarkdownDescription: "Whether role-scoped LatticeVE Kubernetes credentials are enabled.", Computed: true},
+			"metrics_server": schema.BoolAttribute{
+				MarkdownDescription: "Whether new cluster nodes run the bundled Metrics Server. Defaults to true. Changing this value requires replacing the cluster.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(true),
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.RequiresReplace(),
+				},
+			},
 			"vpc_cidr": schema.StringAttribute{
 				MarkdownDescription: "VPC CIDR block of the cluster network.",
 				Computed:            true,
@@ -394,6 +406,10 @@ func (r *KubeClusterResource) Create(ctx context.Context, req resource.CreateReq
 	}
 	if !plan.K8sVersion.IsNull() && !plan.K8sVersion.IsUnknown() {
 		createReq.K8sVersion = plan.K8sVersion.ValueString()
+	}
+	if !plan.MetricsServer.IsNull() && !plan.MetricsServer.IsUnknown() {
+		metricsServer := plan.MetricsServer.ValueBool()
+		createReq.MetricsServer = &metricsServer
 	}
 
 	cluster, err := r.client.CreateKubeCluster(createReq)
@@ -569,6 +585,7 @@ func kubeClusterToState(cluster *KubeCluster, state *KubeClusterResourceModel) {
 	state.VPCCIDR = types.StringValue(cluster.VPCCIDR)
 	state.VPCManaged = types.BoolValue(cluster.VPCManaged)
 	state.OIDCEnabled = types.BoolValue(cluster.OIDCEnabled)
+	state.MetricsServer = types.BoolValue(cluster.MetricsServer)
 	state.CPCount = types.Int64Value(int64(cluster.CPCount))
 	state.WorkerCount = types.Int64Value(int64(cluster.WorkerCount))
 	state.CPVCPUs = types.Int64Value(int64(cluster.CPVCPUs))

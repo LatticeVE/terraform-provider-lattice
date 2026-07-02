@@ -206,6 +206,7 @@ resource "lattice_kube_cluster" "prod" {
   rootfs_id    = lattice_k3s_rootfs_image.release.id
   pool_id      = lattice_public_ip_pool.kube.id
   cni          = "flannel"
+  metrics_server = true # default; enables live CPU/memory in LatticeVE workload views
   cp_count     = 3
   cp_vcpus     = 4
   cp_memory_mb = 8192

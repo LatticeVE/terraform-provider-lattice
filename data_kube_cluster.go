@@ -25,6 +25,7 @@ type KubeClusterDataSourceModel struct {
 	VPCCIDR       types.String    `tfsdk:"vpc_cidr"`
 	VPCManaged    types.Bool      `tfsdk:"vpc_managed"`
 	OIDCEnabled   types.Bool      `tfsdk:"oidc_enabled"`
+	MetricsServer types.Bool      `tfsdk:"metrics_server"`
 	CPCount       types.Int64     `tfsdk:"cp_count"`
 	WorkerCount   types.Int64     `tfsdk:"worker_count"`
 	Kubeconfig    types.String    `tfsdk:"kubeconfig"`
@@ -46,7 +47,7 @@ func (d *KubeClusterDataSource) Schema(_ context.Context, _ datasource.SchemaReq
 		"status": schema.StringAttribute{Computed: true}, "k8s_version": schema.StringAttribute{Computed: true},
 		"kernel_id": schema.StringAttribute{Computed: true}, "kernel_version": schema.StringAttribute{Computed: true}, "rootfs_id": schema.StringAttribute{Computed: true},
 		"endpoint": schema.StringAttribute{Computed: true}, "public_ip": schema.StringAttribute{Computed: true}, "vpc_id": schema.StringAttribute{Computed: true}, "vpc_cidr": schema.StringAttribute{Computed: true},
-		"vpc_managed": schema.BoolAttribute{Computed: true}, "oidc_enabled": schema.BoolAttribute{Computed: true},
+		"vpc_managed": schema.BoolAttribute{Computed: true}, "oidc_enabled": schema.BoolAttribute{Computed: true}, "metrics_server": schema.BoolAttribute{Computed: true},
 		"cp_count": schema.Int64Attribute{Computed: true}, "worker_count": schema.Int64Attribute{Computed: true},
 		"kubeconfig": schema.StringAttribute{Computed: true, Sensitive: true, MarkdownDescription: "Deprecated: API keys cannot request human Kubernetes credentials; use the LatticeVE UI."},
 		"nodes":      schema.ListNestedAttribute{Computed: true, NestedObject: schema.NestedAttributeObject{Attributes: nodeAttrs}},
@@ -107,6 +108,7 @@ func (d *KubeClusterDataSource) Read(ctx context.Context, req datasource.ReadReq
 	state.VPCCIDR = types.StringValue(cluster.VPCCIDR)
 	state.VPCManaged = types.BoolValue(cluster.VPCManaged)
 	state.OIDCEnabled = types.BoolValue(cluster.OIDCEnabled)
+	state.MetricsServer = types.BoolValue(cluster.MetricsServer)
 	state.CPCount = types.Int64Value(int64(cluster.CPCount))
 	state.WorkerCount = types.Int64Value(int64(cluster.WorkerCount))
 	state.Kubeconfig = types.StringNull()

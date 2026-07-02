@@ -78,6 +78,9 @@ resource "lattice_kube_cluster" "prod" {
 
   cni     = "flannel"
   lb_mode = "ccm"
+  # Defaults to true. Disable only if you intentionally do not want Kubernetes
+  # Metrics Server for LatticeVE workload CPU/memory views.
+  metrics_server = true
 
   cp_count     = 3
   cp_vcpus     = 4

@@ -788,6 +788,7 @@ type KubeCluster struct {
 	VPCCIDR       string     `json:"vpc_cidr,omitempty"`
 	VPCManaged    bool       `json:"vpc_managed"`
 	OIDCEnabled   bool       `json:"oidc_enabled"`
+	MetricsServer bool       `json:"metrics_server"`
 	PublicIPID    string     `json:"public_ip_id,omitempty"`
 	PublicIP      string     `json:"public_ip,omitempty"`
 	Endpoint      string     `json:"endpoint,omitempty"`
@@ -843,6 +844,7 @@ type KubeCreateRequest struct {
 	LBMode            string   `json:"lb_mode"`
 	PoolID            string   `json:"pool_id,omitempty"`
 	K8sVersion        string   `json:"k8s_version"`
+	MetricsServer     *bool    `json:"metrics_server,omitempty"`
 }
 
 type KubePatchRequest struct {
