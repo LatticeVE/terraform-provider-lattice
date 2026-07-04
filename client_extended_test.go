@@ -194,7 +194,7 @@ func TestIsNotFound_Nil(t *testing.T) {
 func TestClient_ListNodes(t *testing.T) {
 	expected := []Node{
 		{ID: "node-1", Name: "kvm-amd-01", Arch: "amd64", Status: "online", CPUs: 32, MemoryMB: 65536, StorageGB: 2000},
-		{ID: "node-2", Name: "kvm-arm-01", Arch: "arm64", Status: "online", CPUs: 16, MemoryMB: 32768, StorageGB: 1000},
+		{ID: "node-2", Name: "kvm-arm-01", Arch: "arm64", Status: "online", Paused: true, Draining: true, CPUs: 16, MemoryMB: 32768, StorageGB: 1000},
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -219,6 +219,9 @@ func TestClient_ListNodes(t *testing.T) {
 	}
 	if nodes[1].Arch != "arm64" {
 		t.Errorf("expected arm64, got %s", nodes[1].Arch)
+	}
+	if !nodes[1].Paused || !nodes[1].Draining {
+		t.Errorf("expected paused/draining flags to round-trip, got %+v", nodes[1])
 	}
 }
 

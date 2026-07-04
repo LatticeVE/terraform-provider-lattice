@@ -51,7 +51,9 @@ resource "lattice_k3s_rootfs_image" "latest" {
   }
 }
 
-# Public IP pool backed by a routable subnet on the host NIC
+# Optional public IP pool backed by a routable subnet on the host NIC.
+# LatticeVE always creates or uses a VPC for cluster nodes; this pool only
+# exposes the cluster API and Kubernetes LoadBalancer services externally.
 resource "lattice_public_ip_pool" "kube" {
   name      = "kube-pool"
   interface = var.public_bridge
@@ -74,6 +76,7 @@ resource "lattice_kube_cluster" "prod" {
   kernel_id = lattice_k3s_kernel.latest.id
   rootfs_id = lattice_k3s_rootfs_image.latest.id
   storage   = lattice_storage_backend.linstor.name
+  # vpc_id  = lattice_vpc.existing.id # optional; omitted creates a managed VPC
   pool_id   = lattice_public_ip_pool.kube.id
 
   cni     = "flannel"

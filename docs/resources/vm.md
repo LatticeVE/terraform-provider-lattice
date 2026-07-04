@@ -12,12 +12,31 @@ data "lattice_image" "debian" {
 }
 
 resource "lattice_vm" "web" {
-  name         = "web-01"
+  name                 = "web-01"
+  cpus                 = 4
+  memory_mb            = 8192
+  image_id             = data.lattice_image.debian.id
+  boot_disk_gb         = 40
+  boot_disk_allocation = "thin"
+  nics                 = [{ bridge = lattice_vpc.main.bridge }]
+}
+```
+
+### HA QEMU VM on shared storage
+
+```hcl
+resource "lattice_vm" "api" {
+  name         = "api-01"
   cpus         = 4
   memory_mb    = 8192
   image_id     = data.lattice_image.debian.id
-  boot_disk_gb = 40
-  nics         = [{ bridge = lattice_vpc.main.bridge }]
+  boot_disk_gb = 60
+
+  # HA requires QEMU plus a shared LatticeVE storage backend.
+  storage = "nfs-shared"
+  ha      = true
+
+  nics = [{ bridge = lattice_vpc.main.bridge }]
 }
 ```
 
@@ -71,9 +90,12 @@ resource "lattice_vm" "arm_worker" {
 - `cpus` (Required) — Number of virtual CPUs.
 - `memory_mb` (Required) — Memory in MiB.
 - `boot_disk_gb` (Optional) — Boot disk size in GiB. The backing image is cloned and resized to this size. Defaults to the image size if omitted.
+- `boot_disk_allocation` (Optional, Forces replacement) — QEMU boot disk allocation override: `thin` or `preallocated`. Omit to use the selected storage backend default. Not valid for Firecracker VMs.
 - `image_id` (Optional, Forces replacement) — UUID of a `lattice_image` data source. The image is cloned as the VM's boot disk, equivalent to launching from an AMI. Mutually exclusive with `disk_path`.
 - `iso_path` (Optional) — Path to an ISO file on the host to attach as a CD-ROM drive. Mutually exclusive with `image_id`.
 - `vm_type` (Optional) — Hypervisor type. One of `qemu` (default) or `firecracker`.
+- `storage` (Optional, Forces replacement) — Named LatticeVE storage backend for the boot disk. Required for `ha = true`; the backend must be shared (`nfs`, `iscsi`, `linstor`, `ceph`, etc.).
+- `ha` (Optional, Forces replacement) — Enable VM HA auto-restart. Only valid for QEMU VMs using shared storage.
 - `kernel_id` (Optional) — UUID of a Firecracker kernel from the `lattice_kernel` catalog. Required when `vm_type = "firecracker"`.
 - `kernel_cmdline` (Optional) — Kernel command-line arguments passed to the Firecracker guest kernel. Only valid when `vm_type = "firecracker"`.
 - `arch` (Optional, Computed, Forces replacement) — CPU architecture required for VM placement: `amd64` or `arm64`. The scheduler selects a node whose CPU matches. Computed from the assigned node when not set. Use the `lattice_nodes` data source to discover available architectures.
@@ -87,5 +109,6 @@ resource "lattice_vm" "arm_worker" {
 - `id` — VM UUID assigned by the controller.
 - `status` — VM lifecycle status (`stopped`, `running`, `paused`, etc.).
 - `disk_path` — Absolute host path to the managed boot disk image.
+- `boot_disk_allocation_policy` — Effective boot disk allocation policy reported by LatticeVE.
 - `arch` — Resolved CPU architecture of the node where the VM was placed.
 - `node` — Name of the host node where the VM is running.

@@ -7,6 +7,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
@@ -24,25 +25,29 @@ type VMResource struct {
 }
 
 type VMResourceModel struct {
-	ID            types.String          `tfsdk:"id"`
-	Name          types.String          `tfsdk:"name"`
-	CPUs          types.Int64           `tfsdk:"cpus"`
-	MemoryMB      types.Int64           `tfsdk:"memory_mb"`
-	ISOPath       types.String          `tfsdk:"iso_path"`
-	Status        types.String          `tfsdk:"status"`
-	DiskPath      types.String          `tfsdk:"disk_path"`
-	BootDiskGB    types.Int64           `tfsdk:"boot_disk_gb"`
-	DiskInterface types.String          `tfsdk:"disk_interface"`
-	VMType        types.String          `tfsdk:"vm_type"`
-	KernelID      types.String          `tfsdk:"kernel_id"`
-	KernelCmdline types.String          `tfsdk:"kernel_cmdline"`
-	ImageID       types.String          `tfsdk:"image_id"`
-	Arch          types.String          `tfsdk:"arch"`
-	Node          types.String          `tfsdk:"node"`
-	ForceDestroy  types.Bool            `tfsdk:"force_destroy"`
-	CloudInit     *CloudInitConfigModel `tfsdk:"cloud_init"`
-	ExtraDisks    []ExtraDiskModel      `tfsdk:"extra_disks"`
-	NICs          []NICModel            `tfsdk:"nics"`
+	ID                       types.String          `tfsdk:"id"`
+	Name                     types.String          `tfsdk:"name"`
+	CPUs                     types.Int64           `tfsdk:"cpus"`
+	MemoryMB                 types.Int64           `tfsdk:"memory_mb"`
+	ISOPath                  types.String          `tfsdk:"iso_path"`
+	Status                   types.String          `tfsdk:"status"`
+	DiskPath                 types.String          `tfsdk:"disk_path"`
+	BootDiskGB               types.Int64           `tfsdk:"boot_disk_gb"`
+	DiskInterface            types.String          `tfsdk:"disk_interface"`
+	BootDiskAllocation       types.String          `tfsdk:"boot_disk_allocation"`
+	BootDiskAllocationPolicy types.String          `tfsdk:"boot_disk_allocation_policy"`
+	VMType                   types.String          `tfsdk:"vm_type"`
+	HA                       types.Bool            `tfsdk:"ha"`
+	Storage                  types.String          `tfsdk:"storage"`
+	KernelID                 types.String          `tfsdk:"kernel_id"`
+	KernelCmdline            types.String          `tfsdk:"kernel_cmdline"`
+	ImageID                  types.String          `tfsdk:"image_id"`
+	Arch                     types.String          `tfsdk:"arch"`
+	Node                     types.String          `tfsdk:"node"`
+	ForceDestroy             types.Bool            `tfsdk:"force_destroy"`
+	CloudInit                *CloudInitConfigModel `tfsdk:"cloud_init"`
+	ExtraDisks               []ExtraDiskModel      `tfsdk:"extra_disks"`
+	NICs                     []NICModel            `tfsdk:"nics"`
 }
 
 type CloudInitConfigModel struct {
@@ -138,6 +143,20 @@ func (r *VMResource) Schema(ctx context.Context, req resource.SchemaRequest, res
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
+			"boot_disk_allocation": schema.StringAttribute{
+				MarkdownDescription: "Optional QEMU boot disk allocation override: `thin` or `preallocated`. Omit to use the selected storage backend default. Not valid for Firecracker VMs.",
+				Optional:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"boot_disk_allocation_policy": schema.StringAttribute{
+				MarkdownDescription: "Effective boot disk allocation policy reported by LatticeVE.",
+				Computed:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"cloud_init": schema.SingleNestedAttribute{
 				MarkdownDescription: "Optional cloud-init configuration block.",
 				Optional:            true,
@@ -201,6 +220,23 @@ func (r *VMResource) Schema(ctx context.Context, req resource.SchemaRequest, res
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"ha": schema.BoolAttribute{
+				MarkdownDescription: "Enable VM HA auto-restart. Only valid for QEMU VMs using a shared storage backend.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.RequiresReplace(),
+					boolplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"storage": schema.StringAttribute{
+				MarkdownDescription: "Named LatticeVE storage backend for the VM boot disk. Required when `ha = true`; the backend must be shared, such as `nfs`, `iscsi`, `linstor`, or `ceph`.",
+				Optional:            true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"kernel_id": schema.StringAttribute{
@@ -326,6 +362,11 @@ func (r *VMResource) Create(ctx context.Context, req resource.CreateRequest, res
 		diskInterface = plan.DiskInterface.ValueString()
 	}
 
+	bootDiskAllocation := ""
+	if !plan.BootDiskAllocation.IsNull() && !plan.BootDiskAllocation.IsUnknown() {
+		bootDiskAllocation = plan.BootDiskAllocation.ValueString()
+	}
+
 	extraDisks := make([]ExtraDisk, len(plan.ExtraDisks))
 	for i, d := range plan.ExtraDisks {
 		extraDisks[i] = ExtraDisk{
@@ -380,6 +421,14 @@ func (r *VMResource) Create(ctx context.Context, req resource.CreateRequest, res
 	if !plan.Node.IsNull() && !plan.Node.IsUnknown() {
 		node = plan.Node.ValueString()
 	}
+	storageName := ""
+	if !plan.Storage.IsNull() && !plan.Storage.IsUnknown() {
+		storageName = plan.Storage.ValueString()
+	}
+	ha := false
+	if !plan.HA.IsNull() && !plan.HA.IsUnknown() {
+		ha = plan.HA.ValueBool()
+	}
 
 	vm, err := r.client.CreateVM(
 		plan.Name.ValueString(),
@@ -397,6 +446,9 @@ func (r *VMResource) Create(ctx context.Context, req resource.CreateRequest, res
 		imageID,
 		arch,
 		node,
+		storageName,
+		bootDiskAllocation,
+		ha,
 	)
 	if err != nil {
 		resp.Diagnostics.AddError("Error Creating VM", err.Error())
@@ -421,7 +473,14 @@ func (r *VMResource) Create(ctx context.Context, req resource.CreateRequest, res
 	plan.Status = types.StringValue(string(vm.Status))
 	plan.BootDiskGB = types.Int64Value(int64(vm.BootDiskGB))
 	plan.DiskInterface = types.StringValue(vm.DiskInterface)
+	if vm.BootDiskAllocationPolicy != "" {
+		plan.BootDiskAllocationPolicy = types.StringValue(vm.BootDiskAllocationPolicy)
+	}
 	plan.VMType = types.StringValue(vm.VMType)
+	plan.HA = types.BoolValue(vm.HA)
+	if vm.StorageBackendName != "" {
+		plan.Storage = types.StringValue(vm.StorageBackendName)
+	}
 	if vm.KernelID != "" {
 		plan.KernelID = types.StringValue(vm.KernelID)
 	}
@@ -489,7 +548,16 @@ func (r *VMResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 	state.Status = types.StringValue(string(vm.Status))
 	state.BootDiskGB = types.Int64Value(int64(vm.BootDiskGB))
 	state.DiskInterface = types.StringValue(vm.DiskInterface)
+	if vm.BootDiskAllocationPolicy != "" {
+		state.BootDiskAllocationPolicy = types.StringValue(vm.BootDiskAllocationPolicy)
+	}
 	state.VMType = types.StringValue(vm.VMType)
+	state.HA = types.BoolValue(vm.HA)
+	if vm.StorageBackendName != "" {
+		state.Storage = types.StringValue(vm.StorageBackendName)
+	} else {
+		state.Storage = types.StringNull()
+	}
 	if vm.KernelID != "" {
 		state.KernelID = types.StringValue(vm.KernelID)
 	}

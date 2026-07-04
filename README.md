@@ -65,7 +65,7 @@ provider "lattice" {
 | `lattice_kernel` | Look up an already-imported Firecracker kernel by distro, `version`/`version_glob`, or `arch` |
 | `lattice_kernel_catalog` | Browse kernels available to import (built-in entries plus Firecracker CI discovery) |
 | `lattice_rootfs_image` | Look up a Firecracker rootfs image by name, arch, source, or version |
-| `lattice_nodes` | List host nodes filtered by `arch` (`amd64`/`arm64`); returns capacity metrics |
+| `lattice_nodes` | List host nodes filtered by `arch` (`amd64`/`arm64`); returns capacity metrics plus `status`, `draining`, and `paused` placement state |
 | `lattice_kube_cluster` | Look up a cluster and retrieve endpoint, image, OIDC capability, and live node status |
 | `lattice_public_ip_pools` | List all public IP pools |
 | `lattice_storage_backends` | List all storage backends |
@@ -95,12 +95,31 @@ resource "lattice_ipam_pool" "main" {
 }
 
 resource "lattice_vm" "web" {
-  name         = "web-01"
-  cpus         = 2
-  memory_mb    = 2048
+  name                 = "web-01"
+  cpus                 = 2
+  memory_mb            = 2048
+  image_id             = data.lattice_image.debian.id
+  boot_disk_gb         = 20
+  boot_disk_allocation = "thin" # optional; "preallocated" reserves full size
+  nics                 = [{ bridge = lattice_vpc.main.bridge }]
+}
+```
+
+### HA QEMU VM on shared storage
+
+```hcl
+resource "lattice_vm" "api" {
+  name         = "api-01"
+  cpus         = 4
+  memory_mb    = 8192
   image_id     = data.lattice_image.debian.id
-  boot_disk_gb = 20
-  nics         = [{ bridge = lattice_vpc.main.bridge }]
+  boot_disk_gb = 60
+
+  # HA requires QEMU plus a shared LatticeVE storage backend.
+  storage = "nfs-shared"
+  ha      = true
+
+  nics = [{ bridge = lattice_vpc.main.bridge }]
 }
 ```
 
@@ -194,6 +213,8 @@ resource "lattice_k3s_rootfs_image" "release" {
   lifecycle { create_before_destroy = true }
 }
 
+# Optional external exposure. If omitted, the cluster still gets a managed VPC
+# and remains reachable through the VPC/internal path.
 resource "lattice_public_ip_pool" "kube" {
   name      = "kube-pool"
   interface = "br0"
@@ -204,6 +225,7 @@ resource "lattice_kube_cluster" "prod" {
   name         = "prod"
   kernel_id    = lattice_k3s_kernel.kube.id
   rootfs_id    = lattice_k3s_rootfs_image.release.id
+  # vpc_id    = lattice_vpc.existing.id # optional; omitted creates a managed VPC
   pool_id      = lattice_public_ip_pool.kube.id
   cni          = "flannel"
   metrics_server = true # default; enables live CPU/memory in LatticeVE workload views
@@ -235,7 +257,7 @@ To upgrade Kubernetes, change the rootfs `version` to the next supported release
 
 ## API Coverage
 
-The provider models persistent, declarative infrastructure: VMs, VPC policy and load balancers, public addressing, storage, Firecracker/k3s images, Kubernetes clusters, security-group relationships, IPAM leases, and affinity relationships. Controller operations such as console sessions, guest exec, migration internals, node drain commands, alert acknowledgement, and upgrade retry/force actions intentionally remain operational API/CLI workflows rather than Terraform resources.
+The provider models persistent, declarative infrastructure: VMs, VPC policy and load balancers, public addressing, storage, Firecracker/k3s images, Kubernetes clusters, security-group relationships, IPAM leases, and affinity relationships. Controller operations such as console sessions, guest exec, migration internals, node drain/pause/resume commands, cluster network settings, alert acknowledgement, and upgrade retry/force actions intentionally remain operational API/UI/CLI workflows rather than Terraform resources.
 
 ## Full Examples
 

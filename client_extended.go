@@ -28,6 +28,8 @@ type Node struct {
 	Name          string `json:"name"`
 	Arch          string `json:"arch"`
 	Status        string `json:"status"`
+	Draining      bool   `json:"draining,omitempty"`
+	Paused        bool   `json:"paused,omitempty"`
 	CPUs          int    `json:"cpus"`
 	MemoryMB      int64  `json:"memory_mb"`
 	MemoryUsedMB  int64  `json:"memory_used_mb"`
@@ -824,27 +826,25 @@ type KubeNode struct {
 }
 
 type KubeCreateRequest struct {
-	Name              string   `json:"name"`
-	Runtime           string   `json:"runtime,omitempty"`
-	KernelID          string   `json:"kernel_id,omitempty"`
-	RootfsID          string   `json:"rootfs_id,omitempty"`
-	Storage           string   `json:"storage,omitempty"`
-	VPCID             string   `json:"vpc_id,omitempty"`
-	RootPasswordHash  string   `json:"root_password_hash,omitempty"`
-	SSHAuthorizedKeys []string `json:"ssh_authorized_keys,omitempty"`
-	CPCount           int      `json:"cp_count"`
-	WorkerCount       int      `json:"worker_count"`
-	CPVCPUs           int      `json:"cp_vcpus"`
-	CPMemoryMB        int      `json:"cp_memory_mb"`
-	CPDiskGB          int      `json:"cp_disk_gb"`
-	WorkerVCPUs       int      `json:"worker_vcpus"`
-	WorkerMemMB       int      `json:"worker_memory_mb"`
-	WorkerDiskGB      int      `json:"worker_disk_gb"`
-	CNI               string   `json:"cni"`
-	LBMode            string   `json:"lb_mode"`
-	PoolID            string   `json:"pool_id,omitempty"`
-	K8sVersion        string   `json:"k8s_version"`
-	MetricsServer     *bool    `json:"metrics_server,omitempty"`
+	Name          string `json:"name"`
+	Runtime       string `json:"runtime,omitempty"`
+	KernelID      string `json:"kernel_id,omitempty"`
+	RootfsID      string `json:"rootfs_id,omitempty"`
+	Storage       string `json:"storage,omitempty"`
+	VPCID         string `json:"vpc_id,omitempty"`
+	CPCount       int    `json:"cp_count"`
+	WorkerCount   int    `json:"worker_count"`
+	CPVCPUs       int    `json:"cp_vcpus"`
+	CPMemoryMB    int    `json:"cp_memory_mb"`
+	CPDiskGB      int    `json:"cp_disk_gb"`
+	WorkerVCPUs   int    `json:"worker_vcpus"`
+	WorkerMemMB   int    `json:"worker_memory_mb"`
+	WorkerDiskGB  int    `json:"worker_disk_gb"`
+	CNI           string `json:"cni"`
+	LBMode        string `json:"lb_mode"`
+	PoolID        string `json:"pool_id,omitempty"`
+	K8sVersion    string `json:"k8s_version"`
+	MetricsServer *bool  `json:"metrics_server,omitempty"`
 }
 
 type KubePatchRequest struct {

@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -25,37 +24,35 @@ type KubeClusterResource struct {
 }
 
 type KubeClusterResourceModel struct {
-	ID                types.String    `tfsdk:"id"`
-	Name              types.String    `tfsdk:"name"`
-	Runtime           types.String    `tfsdk:"runtime"`
-	KernelID          types.String    `tfsdk:"kernel_id"`
-	KernelVersion     types.String    `tfsdk:"kernel_version"`
-	RootfsID          types.String    `tfsdk:"rootfs_id"`
-	Storage           types.String    `tfsdk:"storage"`
-	K8sVersion        types.String    `tfsdk:"k8s_version"`
-	CNI               types.String    `tfsdk:"cni"`
-	LBMode            types.String    `tfsdk:"lb_mode"`
-	PoolID            types.String    `tfsdk:"pool_id"`
-	CPCount           types.Int64     `tfsdk:"cp_count"`
-	WorkerCount       types.Int64     `tfsdk:"worker_count"`
-	CPVCPUs           types.Int64     `tfsdk:"cp_vcpus"`
-	CPMemoryMB        types.Int64     `tfsdk:"cp_memory_mb"`
-	CPDiskGB          types.Int64     `tfsdk:"cp_disk_gb"`
-	WorkerVCPUs       types.Int64     `tfsdk:"worker_vcpus"`
-	WorkerMemoryMB    types.Int64     `tfsdk:"worker_memory_mb"`
-	WorkerDiskGB      types.Int64     `tfsdk:"worker_disk_gb"`
-	Status            types.String    `tfsdk:"status"`
-	Endpoint          types.String    `tfsdk:"endpoint"`
-	PublicIP          types.String    `tfsdk:"public_ip"`
-	VPCID             types.String    `tfsdk:"vpc_id"`
-	VPCCIDR           types.String    `tfsdk:"vpc_cidr"`
-	VPCManaged        types.Bool      `tfsdk:"vpc_managed"`
-	OIDCEnabled       types.Bool      `tfsdk:"oidc_enabled"`
-	MetricsServer     types.Bool      `tfsdk:"metrics_server"`
-	RootPasswordHash  types.String    `tfsdk:"root_password_hash"`
-	SSHAuthorizedKeys types.List      `tfsdk:"ssh_authorized_keys"`
-	Kubeconfig        types.String    `tfsdk:"kubeconfig"`
-	Nodes             []KubeNodeModel `tfsdk:"nodes"`
+	ID             types.String    `tfsdk:"id"`
+	Name           types.String    `tfsdk:"name"`
+	Runtime        types.String    `tfsdk:"runtime"`
+	KernelID       types.String    `tfsdk:"kernel_id"`
+	KernelVersion  types.String    `tfsdk:"kernel_version"`
+	RootfsID       types.String    `tfsdk:"rootfs_id"`
+	Storage        types.String    `tfsdk:"storage"`
+	K8sVersion     types.String    `tfsdk:"k8s_version"`
+	CNI            types.String    `tfsdk:"cni"`
+	LBMode         types.String    `tfsdk:"lb_mode"`
+	PoolID         types.String    `tfsdk:"pool_id"`
+	CPCount        types.Int64     `tfsdk:"cp_count"`
+	WorkerCount    types.Int64     `tfsdk:"worker_count"`
+	CPVCPUs        types.Int64     `tfsdk:"cp_vcpus"`
+	CPMemoryMB     types.Int64     `tfsdk:"cp_memory_mb"`
+	CPDiskGB       types.Int64     `tfsdk:"cp_disk_gb"`
+	WorkerVCPUs    types.Int64     `tfsdk:"worker_vcpus"`
+	WorkerMemoryMB types.Int64     `tfsdk:"worker_memory_mb"`
+	WorkerDiskGB   types.Int64     `tfsdk:"worker_disk_gb"`
+	Status         types.String    `tfsdk:"status"`
+	Endpoint       types.String    `tfsdk:"endpoint"`
+	PublicIP       types.String    `tfsdk:"public_ip"`
+	VPCID          types.String    `tfsdk:"vpc_id"`
+	VPCCIDR        types.String    `tfsdk:"vpc_cidr"`
+	VPCManaged     types.Bool      `tfsdk:"vpc_managed"`
+	OIDCEnabled    types.Bool      `tfsdk:"oidc_enabled"`
+	MetricsServer  types.Bool      `tfsdk:"metrics_server"`
+	Kubeconfig     types.String    `tfsdk:"kubeconfig"`
+	Nodes          []KubeNodeModel `tfsdk:"nodes"`
 }
 
 type KubeNodeModel struct {
@@ -129,18 +126,6 @@ func (r *KubeClusterResource) Schema(ctx context.Context, req resource.SchemaReq
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"root_password_hash": schema.StringAttribute{
-				MarkdownDescription: "Optional crypt(3) hash assigned to root on every Kubernetes node. Plaintext passwords are not accepted.",
-				Optional:            true,
-				Sensitive:           true,
-				PlanModifiers:       []planmodifier.String{stringplanmodifier.RequiresReplace()},
-			},
-			"ssh_authorized_keys": schema.ListAttribute{
-				MarkdownDescription: "Public SSH keys installed on every Kubernetes node. Enables key-only node SSH.",
-				Optional:            true,
-				ElementType:         types.StringType,
-				PlanModifiers:       []planmodifier.List{listplanmodifier.RequiresReplace()},
-			},
 			"k8s_version": schema.StringAttribute{
 				MarkdownDescription: "Kubernetes version string, e.g. \"v1.32.0\". Inferred from the rootfs image name/description when omitted.",
 				Optional:            true,
@@ -168,7 +153,7 @@ func (r *KubeClusterResource) Schema(ctx context.Context, req resource.SchemaReq
 				},
 			},
 			"pool_id": schema.StringAttribute{
-				MarkdownDescription: "Public IP pool ID for the control plane endpoint.",
+				MarkdownDescription: "Optional public IP pool ID used to expose the control-plane endpoint externally and allocate LatticeVE CCM public IPs for Kubernetes LoadBalancer services. Omit for VPC-only clusters.",
 				Optional:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
@@ -257,7 +242,7 @@ func (r *KubeClusterResource) Schema(ctx context.Context, req resource.SchemaReq
 				Computed:            true,
 			},
 			"vpc_id": schema.StringAttribute{
-				MarkdownDescription: "Optional existing VPC ID for the cluster network. When omitted, LatticeVE creates and owns a dedicated VPC.",
+				MarkdownDescription: "Optional existing VPC ID for the cluster network. When omitted, LatticeVE creates and owns a dedicated managed VPC.",
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers:       []planmodifier.String{stringplanmodifier.UseStateForUnknown(), stringplanmodifier.RequiresReplace()},
@@ -361,15 +346,6 @@ func (r *KubeClusterResource) Create(ctx context.Context, req resource.CreateReq
 	}
 	if !plan.VPCID.IsNull() && !plan.VPCID.IsUnknown() {
 		createReq.VPCID = plan.VPCID.ValueString()
-	}
-	if !plan.RootPasswordHash.IsNull() && !plan.RootPasswordHash.IsUnknown() {
-		createReq.RootPasswordHash = plan.RootPasswordHash.ValueString()
-	}
-	if !plan.SSHAuthorizedKeys.IsNull() && !plan.SSHAuthorizedKeys.IsUnknown() {
-		resp.Diagnostics.Append(plan.SSHAuthorizedKeys.ElementsAs(ctx, &createReq.SSHAuthorizedKeys, false)...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
 	}
 	if !plan.CPCount.IsNull() && !plan.CPCount.IsUnknown() {
 		createReq.CPCount = int(plan.CPCount.ValueInt64())

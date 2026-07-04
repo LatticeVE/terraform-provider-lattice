@@ -26,6 +26,8 @@ type NodeModel struct {
 	Name          types.String `tfsdk:"name"`
 	Arch          types.String `tfsdk:"arch"`
 	Status        types.String `tfsdk:"status"`
+	Draining      types.Bool   `tfsdk:"draining"`
+	Paused        types.Bool   `tfsdk:"paused"`
 	CPUs          types.Int64  `tfsdk:"cpus"`
 	MemoryMB      types.Int64  `tfsdk:"memory_mb"`
 	MemoryUsedMB  types.Int64  `tfsdk:"memory_used_mb"`
@@ -67,7 +69,15 @@ func (d *NodesDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, 
 							Computed:            true,
 						},
 						"status": schema.StringAttribute{
-							MarkdownDescription: "Node status: `online`, `offline`, or `maintenance`.",
+							MarkdownDescription: "Node status, typically `online` or `offline`.",
+							Computed:            true,
+						},
+						"draining": schema.BoolAttribute{
+							MarkdownDescription: "Whether the node is being drained; the scheduler will not place new VMs here.",
+							Computed:            true,
+						},
+						"paused": schema.BoolAttribute{
+							MarkdownDescription: "Whether the node is cordoned/paused; existing VMs keep running, but the scheduler will not place new VMs here.",
 							Computed:            true,
 						},
 						"cpus": schema.Int64Attribute{
@@ -137,6 +147,8 @@ func (d *NodesDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 			Name:          types.StringValue(n.Name),
 			Arch:          types.StringValue(n.Arch),
 			Status:        types.StringValue(n.Status),
+			Draining:      types.BoolValue(n.Draining),
+			Paused:        types.BoolValue(n.Paused),
 			CPUs:          types.Int64Value(int64(n.CPUs)),
 			MemoryMB:      types.Int64Value(n.MemoryMB),
 			MemoryUsedMB:  types.Int64Value(n.MemoryUsedMB),

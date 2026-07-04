@@ -96,6 +96,9 @@ func TestClient_CreateVM(t *testing.T) {
 	inputBootDiskGB := 30
 	inputDiskInterface := "scsi"
 	inputISO := "/path/to/iso"
+	inputStorage := "nfs-shared"
+	inputBootDiskAllocation := "preallocated"
+	inputHA := true
 	inputCloudInit := &CloudInitConfig{
 		UserData: "user-data",
 		MetaData: "meta-data",
@@ -104,18 +107,21 @@ func TestClient_CreateVM(t *testing.T) {
 	inputNICs := []NIC{{Bridge: "br0", Model: "e1000"}}
 
 	expectedVM := VM{
-		ID:            "new-uuid",
-		Name:          inputName,
-		CPUs:          inputCPUs,
-		Memory:        inputMemory,
-		Status:        StatusStopped,
-		ISOPath:       inputISO,
-		CloudInit:     inputCloudInit,
-		ExtraDisks:    []ExtraDisk{{Index: 1, SizeGB: 15, DiskPath: "/vm/disk1.qcow2", Interface: "scsi"}},
-		NICs:          []NIC{{Index: 1, Bridge: "br0", MACAddr: "aa:bb:cc:dd:ee:ff", DeviceID: "nic1", Model: "e1000"}},
-		DiskPath:      "/vm/disk.qcow2",
-		BootDiskGB:    inputBootDiskGB,
-		DiskInterface: inputDiskInterface,
+		ID:                       "new-uuid",
+		Name:                     inputName,
+		CPUs:                     inputCPUs,
+		Memory:                   inputMemory,
+		Status:                   StatusStopped,
+		ISOPath:                  inputISO,
+		CloudInit:                inputCloudInit,
+		ExtraDisks:               []ExtraDisk{{Index: 1, SizeGB: 15, DiskPath: "/vm/disk1.qcow2", Interface: "scsi"}},
+		NICs:                     []NIC{{Index: 1, Bridge: "br0", MACAddr: "aa:bb:cc:dd:ee:ff", DeviceID: "nic1", Model: "e1000"}},
+		DiskPath:                 "/vm/disk.qcow2",
+		BootDiskGB:               inputBootDiskGB,
+		DiskInterface:            inputDiskInterface,
+		BootDiskAllocationPolicy: inputBootDiskAllocation,
+		StorageBackendName:       inputStorage,
+		HA:                       inputHA,
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -131,7 +137,7 @@ func TestClient_CreateVM(t *testing.T) {
 			t.Fatalf("failed to decode request body: %v", err)
 		}
 
-		if req.Name != inputName || req.CPUs != inputCPUs || req.MemoryMB != inputMemory || req.ISOPath != inputISO || req.BootDiskGB != inputBootDiskGB || req.DiskInterface != inputDiskInterface {
+		if req.Name != inputName || req.CPUs != inputCPUs || req.MemoryMB != inputMemory || req.ISOPath != inputISO || req.BootDiskGB != inputBootDiskGB || req.DiskInterface != inputDiskInterface || req.Storage != inputStorage || req.BootDiskAllocation != inputBootDiskAllocation || req.HA != inputHA {
 			t.Errorf("unexpected request payload: %+v", req)
 		}
 
@@ -142,7 +148,7 @@ func TestClient_CreateVM(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "test-key", true)
-	vm, err := client.CreateVM(inputName, inputCPUs, inputMemory, inputBootDiskGB, inputDiskInterface, inputISO, inputCloudInit, inputDisks, inputNICs, "", "", "", "", "", "")
+	vm, err := client.CreateVM(inputName, inputCPUs, inputMemory, inputBootDiskGB, inputDiskInterface, inputISO, inputCloudInit, inputDisks, inputNICs, "", "", "", "", "", "", inputStorage, inputBootDiskAllocation, inputHA)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

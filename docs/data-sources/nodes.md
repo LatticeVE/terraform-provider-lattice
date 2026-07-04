@@ -51,7 +51,9 @@ Each entry in `nodes` contains:
 - `id` — Node UUID.
 - `name` — Node hostname (e.g. `kvm-arm-01`). Pass this to `lattice_vm.node` to pin placement.
 - `arch` — CPU architecture: `amd64` or `arm64`.
-- `status` — Node status: `online`, `offline`, or `maintenance`.
+- `status` — Node status, typically `online` or `offline`.
+- `draining` — Whether a drain operation is active. The scheduler will not place new VMs on a draining node.
+- `paused` — Whether the node is cordoned/paused. Existing VMs keep running, but the scheduler will not place new VMs there.
 - `cpus` — Total logical CPU count.
 - `memory_mb` — Total RAM in MiB.
 - `memory_used_mb` — RAM currently allocated to VMs in MiB.
@@ -60,6 +62,6 @@ Each entry in `nodes` contains:
 
 ## Notes
 
-- Nodes with `status = "offline"` or `"maintenance"` are returned by this data source but the scheduler will not place new VMs on them. Use the `status` attribute in expressions to filter them out if needed.
+- Nodes with `status = "offline"`, `draining = true`, or `paused = true` are returned by this data source but the scheduler will not place new VMs on them. Use these attributes in expressions to filter candidates if needed.
 - `arch` on `lattice_vm` is a scheduler *hint* — the controller will reject the create if no online node of the requested arch is available.
 - `node` on `lattice_vm` is a hard pin — the controller will reject the create if that specific node is offline or at capacity.

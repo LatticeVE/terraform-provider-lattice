@@ -42,28 +42,31 @@ type NIC struct {
 }
 
 type VM struct {
-	ID            string           `json:"id"`
-	Name          string           `json:"name"`
-	CPUs          int              `json:"cpus"`
-	Memory        int              `json:"memory_mb"`
-	Disks         []string         `json:"disks,omitempty"`
-	Status        VMStatus         `json:"status"`
-	ISOPath       string           `json:"iso_path,omitempty"`
-	CloudInit     *CloudInitConfig `json:"cloud_init,omitempty"`
-	ExtraDisks    []ExtraDisk      `json:"extra_disks,omitempty"`
-	NICs          []NIC            `json:"nics,omitempty"`
-	PID           int              `json:"pid,omitempty"`
-	QMPSocket     string           `json:"qmp_socket,omitempty"`
-	VNCSocket     string           `json:"vnc_socket,omitempty"`
-	DiskPath      string           `json:"disk_path,omitempty"`
-	BootDiskGB    int              `json:"boot_disk_gb,omitempty"`
-	DiskInterface string           `json:"disk_interface,omitempty"`
-	VMType        string           `json:"vm_type,omitempty"`
-	KernelID      string           `json:"kernel_id,omitempty"`
-	KernelCmdline string           `json:"kernel_cmdline,omitempty"`
-	ImageID       string           `json:"image_id,omitempty"`
-	Arch          string           `json:"arch,omitempty"`
-	Node          string           `json:"node,omitempty"`
+	ID                       string           `json:"id"`
+	Name                     string           `json:"name"`
+	CPUs                     int              `json:"cpus"`
+	Memory                   int              `json:"memory_mb"`
+	Disks                    []string         `json:"disks,omitempty"`
+	Status                   VMStatus         `json:"status"`
+	ISOPath                  string           `json:"iso_path,omitempty"`
+	CloudInit                *CloudInitConfig `json:"cloud_init,omitempty"`
+	ExtraDisks               []ExtraDisk      `json:"extra_disks,omitempty"`
+	NICs                     []NIC            `json:"nics,omitempty"`
+	PID                      int              `json:"pid,omitempty"`
+	QMPSocket                string           `json:"qmp_socket,omitempty"`
+	VNCSocket                string           `json:"vnc_socket,omitempty"`
+	DiskPath                 string           `json:"disk_path,omitempty"`
+	BootDiskGB               int              `json:"boot_disk_gb,omitempty"`
+	DiskInterface            string           `json:"disk_interface,omitempty"`
+	BootDiskAllocationPolicy string           `json:"boot_disk_allocation_policy,omitempty"`
+	VMType                   string           `json:"vm_type,omitempty"`
+	HA                       bool             `json:"ha,omitempty"`
+	StorageBackendName       string           `json:"storage_backend_name,omitempty"`
+	KernelID                 string           `json:"kernel_id,omitempty"`
+	KernelCmdline            string           `json:"kernel_cmdline,omitempty"`
+	ImageID                  string           `json:"image_id,omitempty"`
+	Arch                     string           `json:"arch,omitempty"`
+	Node                     string           `json:"node,omitempty"`
 }
 
 type Client struct {
@@ -142,40 +145,46 @@ func (c *Client) GetVM(id string) (*VM, error) {
 }
 
 type vmCreateRequest struct {
-	Name          string           `json:"name"`
-	CPUs          int              `json:"cpus"`
-	MemoryMB      int              `json:"memory_mb"`
-	BootDiskGB    int              `json:"boot_disk_gb,omitempty"`
-	DiskInterface string           `json:"disk_interface,omitempty"`
-	ISOPath       string           `json:"iso_path,omitempty"`
-	CloudInit     *CloudInitConfig `json:"cloud_init,omitempty"`
-	ExtraDisks    []ExtraDisk      `json:"extra_disks,omitempty"`
-	NICs          []NIC            `json:"nics,omitempty"`
-	VMType        string           `json:"vm_type,omitempty"`
-	KernelID      string           `json:"kernel_id,omitempty"`
-	KernelCmdline string           `json:"kernel_cmdline,omitempty"`
-	ImageID       string           `json:"image_id,omitempty"`
-	Arch          string           `json:"arch,omitempty"`
-	Node          string           `json:"node,omitempty"`
+	Name               string           `json:"name"`
+	CPUs               int              `json:"cpus"`
+	MemoryMB           int              `json:"memory_mb"`
+	BootDiskGB         int              `json:"boot_disk_gb,omitempty"`
+	DiskInterface      string           `json:"disk_interface,omitempty"`
+	BootDiskAllocation string           `json:"boot_disk_allocation,omitempty"`
+	ISOPath            string           `json:"iso_path,omitempty"`
+	CloudInit          *CloudInitConfig `json:"cloud_init,omitempty"`
+	ExtraDisks         []ExtraDisk      `json:"extra_disks,omitempty"`
+	NICs               []NIC            `json:"nics,omitempty"`
+	VMType             string           `json:"vm_type,omitempty"`
+	HA                 bool             `json:"ha,omitempty"`
+	Storage            string           `json:"storage,omitempty"`
+	KernelID           string           `json:"kernel_id,omitempty"`
+	KernelCmdline      string           `json:"kernel_cmdline,omitempty"`
+	ImageID            string           `json:"image_id,omitempty"`
+	Arch               string           `json:"arch,omitempty"`
+	Node               string           `json:"node,omitempty"`
 }
 
-func (c *Client) CreateVM(name string, cpus, memory int, bootDiskGB int, diskInterface string, isoPath string, cloudInit *CloudInitConfig, extraDisks []ExtraDisk, nics []NIC, vmType, kernelID, kernelCmdline, imageID, arch, node string) (*VM, error) {
+func (c *Client) CreateVM(name string, cpus, memory int, bootDiskGB int, diskInterface string, isoPath string, cloudInit *CloudInitConfig, extraDisks []ExtraDisk, nics []NIC, vmType, kernelID, kernelCmdline, imageID, arch, node, storage, bootDiskAllocation string, ha bool) (*VM, error) {
 	reqBody := vmCreateRequest{
-		Name:          name,
-		CPUs:          cpus,
-		MemoryMB:      memory,
-		BootDiskGB:    bootDiskGB,
-		DiskInterface: diskInterface,
-		ISOPath:       isoPath,
-		CloudInit:     cloudInit,
-		ExtraDisks:    extraDisks,
-		NICs:          nics,
-		VMType:        vmType,
-		KernelID:      kernelID,
-		KernelCmdline: kernelCmdline,
-		ImageID:       imageID,
-		Arch:          arch,
-		Node:          node,
+		Name:               name,
+		CPUs:               cpus,
+		MemoryMB:           memory,
+		BootDiskGB:         bootDiskGB,
+		DiskInterface:      diskInterface,
+		ISOPath:            isoPath,
+		CloudInit:          cloudInit,
+		ExtraDisks:         extraDisks,
+		NICs:               nics,
+		VMType:             vmType,
+		HA:                 ha,
+		Storage:            storage,
+		KernelID:           kernelID,
+		KernelCmdline:      kernelCmdline,
+		ImageID:            imageID,
+		Arch:               arch,
+		Node:               node,
+		BootDiskAllocation: bootDiskAllocation,
 	}
 
 	body, err := json.Marshal(reqBody)

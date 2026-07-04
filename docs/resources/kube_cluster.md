@@ -21,6 +21,16 @@ resource "lattice_k3s_rootfs_image" "release" {
   }
 }
 
+# Optional. If omitted, LatticeVE creates a managed VPC for the cluster and
+# deletes it with the cluster. Use vpc_id only when you want to place the
+# cluster on an existing dedicated VPC that LatticeVE should not delete.
+# resource "lattice_vpc" "kube" {
+#   name = "prod-kube"
+#   cidr = "10.100.10.0/24"
+# }
+
+# Optional. Required only when the cluster API or Kubernetes LoadBalancer
+# services should receive addresses from a routable external pool.
 resource "lattice_public_ip_pool" "kube" {
   name      = "kube-pool"
   interface = "br0"
@@ -31,6 +41,7 @@ resource "lattice_kube_cluster" "prod" {
   name      = "prod"
   kernel_id = lattice_k3s_kernel.kube.id
   rootfs_id = lattice_k3s_rootfs_image.release.id
+  # vpc_id = lattice_vpc.kube.id
   pool_id   = lattice_public_ip_pool.kube.id
   cni       = "flannel"
   lb_mode   = "ccm"
@@ -52,7 +63,27 @@ resource "lattice_kube_cluster" "prod" {
 The provider API key cannot retrieve a human kubeconfig. Download a short-lived,
 role-scoped kubeconfig from the LatticeVE UI after apply.
 
-The pool CIDR must be reserved inside the selected external bridge's connected IPv4 subnet and excluded from upstream DHCP. The cluster allocates and manages its own API endpoint address from `pool_id`; do not create a separate `lattice_public_ip` for it.
+## Networking Model
+
+Every LatticeKube cluster runs inside a VPC. If `vpc_id` is omitted, the
+LatticeVE API creates a dedicated managed VPC, assigns cluster node addresses
+inside it, and deletes that VPC when the cluster is deleted. If `vpc_id` is
+set, the existing VPC must have a CIDR, gateway, and bridge, and LatticeVE will
+not delete it with the cluster.
+
+The VPC gateway is the internal Kubernetes API VIP on port `6443`; LatticeVE
+runs the router/load-balancer path that forwards that VIP to the control-plane
+nodes. The optional `pool_id` is only for external/public exposure: when set,
+LatticeVE allocates a public IP from that pool for the cluster endpoint and the
+CCM can allocate public IPs for Kubernetes `LoadBalancer` services. When
+`pool_id` is omitted, the cluster is still valid, but it is reachable only via
+the VPC/internal networking path and LoadBalancer services do not receive
+public IPs from LatticeVE.
+
+The public IP pool CIDR must be reserved inside the selected external bridge's
+connected IPv4 subnet and excluded from upstream DHCP. Do not create a separate
+`lattice_public_ip` for the cluster API endpoint; the cluster owns the public
+IP it allocates from `pool_id`.
 
 ## Scale-out Example
 
@@ -105,10 +136,8 @@ LatticeVE validates the upgrade path, snapshots etcd, upgrades HA control planes
 - `cni` (Optional, Computed, Forces new resource) — CNI plugin: `flannel`, `cilium`, or `none`.
 - `lb_mode` (Optional, Computed, Forces new resource) — Load-balancer mode: `ccm`, `metallb`, or `cilium`.
 - `metrics_server` (Optional, Computed, Forces new resource) — Enables the bundled Kubernetes Metrics Server for live CPU/memory in LatticeVE workload views. Defaults to `true`; set `false` to bootstrap the cluster with `--disable=metrics-server`.
-- `pool_id` (Optional, Forces new resource) — Public IP pool ID for the control-plane floating IP.
-- `vpc_id` (Optional, Computed, Forces new resource) — Existing VPC UUID; when omitted LatticeVE creates a managed VPC.
-- `root_password_hash` (Optional, Sensitive, Forces new resource) — crypt(3) root password hash for cluster nodes.
-- `ssh_authorized_keys` (Optional, Forces new resource) — public SSH keys installed on cluster nodes.
+- `pool_id` (Optional, Forces new resource) — Public IP pool ID used to expose the control-plane endpoint externally and to allocate LatticeVE CCM public IPs for Kubernetes `LoadBalancer` services. Omit it for VPC-only clusters.
+- `vpc_id` (Optional, Computed, Forces new resource) — Existing VPC UUID for the cluster network. When omitted, LatticeVE creates and owns a managed VPC.
 - `cp_count` (Optional, Computed) — Control-plane node count. Must be 1, 3, or 5. Scale-out is in place; scale-down is rejected.
 - `worker_count` (Optional, Computed) — Worker node count. **Updatable** — increase to scale out, decrease to scale in.
 - `cp_vcpus` (Optional, Computed, Forces new resource) — vCPUs per control-plane node.
