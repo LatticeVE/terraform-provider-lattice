@@ -1,0 +1,16 @@
+lattice_endpoint = "https://10.0.7.48:8006"
+lattice_api_key  = "replace-me"
+lattice_insecure = true
+
+resource_prefix = "tf-kube-staging"
+
+# Pin these for deterministic upgrade tests; leave null for latest discovered.
+kernel_version = null
+rootfs_version = null
+
+# Default is VPC-only. Set both values to validate public endpoint/CCM flow.
+public_bridge    = "br0"
+public_pool_cidr = ""
+
+cp_count     = 1
+worker_count = 1
