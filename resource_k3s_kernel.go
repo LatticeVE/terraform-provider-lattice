@@ -24,6 +24,7 @@ type K3sKernelResourceModel struct {
 	Version     types.String `tfsdk:"version"`
 	DownloadURL types.String `tfsdk:"download_url"`
 	SizeBytes   types.Int64  `tfsdk:"size_bytes"`
+	Managed     types.Bool   `tfsdk:"managed"`
 }
 
 func NewK3sKernelResource() resource.Resource { return &K3sKernelResource{} }
@@ -42,6 +43,7 @@ func (r *K3sKernelResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"version":      schema.StringAttribute{Optional: true, Computed: true, MarkdownDescription: "Optional exact Linux kernel version. When omitted, imports the newest discovered kernel for the architecture.", PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
 			"download_url": schema.StringAttribute{Computed: true, MarkdownDescription: "Verified GitHub release asset URL."},
 			"size_bytes":   schema.Int64Attribute{Computed: true, MarkdownDescription: "Kernel size in bytes."},
+			"managed":      schema.BoolAttribute{Computed: true, MarkdownDescription: "True when this Terraform resource downloaded the kernel; false when it reused a pre-existing imported kernel."},
 		},
 	}
 }
@@ -64,29 +66,18 @@ func (r *K3sKernelResource) Create(ctx context.Context, req resource.CreateReque
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	entries, err := r.client.DiscoverK3sKernels()
-	if err != nil {
-		resp.Diagnostics.AddError("Error Discovering k3s Kernels", err.Error())
-		return
-	}
 	version := ""
 	if !plan.Version.IsNull() && !plan.Version.IsUnknown() {
 		version = plan.Version.ValueString()
 	}
-	for _, entry := range entries {
-		if entry.Arch != plan.Arch.ValueString() || (version != "" && entry.Version != version) {
-			continue
-		}
-		kernel, err := r.client.ImportK3sKernel(entry)
-		if err != nil {
-			resp.Diagnostics.AddError("Error Importing k3s Kernel", err.Error())
-			return
-		}
-		k3sKernelToState(*kernel, entry.DownloadURL, &plan)
-		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+	kernel, downloadURL, managed, err := ensureK3sKernel(r.client, plan.Arch.ValueString(), version)
+	if err != nil {
+		resp.Diagnostics.AddError("Error Ensuring k3s Kernel", err.Error())
 		return
 	}
-	resp.Diagnostics.AddError("No Matching k3s Kernel", fmt.Sprintf("no Kubernetes-compatible kernel was found for architecture %q and version %q", plan.Arch.ValueString(), version))
+	k3sKernelToState(kernel, downloadURL, &plan)
+	plan.Managed = types.BoolValue(managed)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
 func (r *K3sKernelResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -119,6 +110,9 @@ func (r *K3sKernelResource) Delete(ctx context.Context, req resource.DeleteReque
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	if !k3sKernelShouldDeleteOnDestroy(state.Managed) {
+		return
+	}
 	if err := r.client.DeleteKernel(state.ID.ValueString()); err != nil && !strings.Contains(err.Error(), "404") {
 		resp.Diagnostics.AddError("Error Deleting k3s Kernel", err.Error())
 	}
@@ -131,4 +125,61 @@ func k3sKernelToState(kernel Kernel, downloadURL string, state *K3sKernelResourc
 	state.Version = types.StringValue(kernel.Version)
 	state.DownloadURL = types.StringValue(downloadURL)
 	state.SizeBytes = types.Int64Value(kernel.SizeBytes)
+}
+
+func ensureK3sKernel(client *Client, arch, version string) (Kernel, string, bool, error) {
+	entries, err := client.DiscoverK3sKernels()
+	if err != nil {
+		return Kernel{}, "", false, fmt.Errorf("discover k3s kernels: %w", err)
+	}
+	entry, ok := selectK3sKernelDiscoveryEntry(entries, arch, version)
+	if !ok {
+		return Kernel{}, "", false, fmt.Errorf("no Kubernetes-compatible kernel was found for architecture %q and version %q", arch, version)
+	}
+	kernels, err := client.ListKernels()
+	if err != nil {
+		return Kernel{}, "", false, fmt.Errorf("list kernels: %w", err)
+	}
+	if kernel, ok := findExistingK3sKernel(kernels, entry); ok {
+		return kernel, entry.DownloadURL, false, nil
+	}
+	kernel, err := client.ImportK3sKernel(entry)
+	if err != nil {
+		return Kernel{}, "", false, fmt.Errorf("import k3s kernel: %w", err)
+	}
+	return *kernel, entry.DownloadURL, true, nil
+}
+
+func selectK3sKernelDiscoveryEntry(entries []K3sKernelDiscoveryEntry, arch, version string) (K3sKernelDiscoveryEntry, bool) {
+	for _, entry := range entries {
+		if entry.Arch != arch || (version != "" && entry.Version != version) {
+			continue
+		}
+		return entry, true
+	}
+	return K3sKernelDiscoveryEntry{}, false
+}
+
+func findExistingK3sKernel(kernels []Kernel, entry K3sKernelDiscoveryEntry) (Kernel, bool) {
+	var versionMatch *Kernel
+	for i := range kernels {
+		kernel := kernels[i]
+		if kernel.Distro != "latticeve-k3s" || kernel.Arch != entry.Arch {
+			continue
+		}
+		if kernel.Name == entry.Name {
+			return kernel, true
+		}
+		if versionMatch == nil && entry.Version != "" && kernel.Version == entry.Version {
+			versionMatch = &kernel
+		}
+	}
+	if versionMatch != nil {
+		return *versionMatch, true
+	}
+	return Kernel{}, false
+}
+
+func k3sKernelShouldDeleteOnDestroy(managed types.Bool) bool {
+	return managed.IsNull() || managed.IsUnknown() || managed.ValueBool()
 }
